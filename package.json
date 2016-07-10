@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "description": "A small utility to keep track of your score in Farkle.",
   "scripts": {
-    "clean": "rimraf dist",
+    "clean": "rimraf dist && mkdir dist && mkdir dist/images",
     "build:webpack": "NODE_ENV=production webpack --config webpack.config.js",
-    "build": "npm run clean && cp -r src/index.html ./index.html && npm run build:webpack",
+    "build": "npm run clean && cp -r src/index.html ./index.html && cp -r src/images dist && npm run build:webpack",
     "start": "npm run clean && cp -r src/dev.html ./index.html && node devServer.js",
     "lint": "eslint src"
   },

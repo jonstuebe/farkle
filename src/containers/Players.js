@@ -68,17 +68,10 @@ const Players = React.createClass({
 
     renderFields() {
 
-        let style = {
-            display: 'inline-block',
-            width: '50%',
-            boxSizing: 'border-box',
-            borderRight: '1px solid #ccc',
-        };
-
         return (
             <form onSubmit={this.addNewPlayer}>
-                <input type="text" className="input input--name" placeholder="first name" style={style} ref='first_name' />
-                <input type="text" className="input input--name" placeholder="last name" style={style} ref='last_name' />
+                <input type="text" className="input input--name" placeholder="first name" ref='first_name' />
+                <input type="text" className="input input--name" placeholder="last name" ref='last_name' />
                 <input type="submit" className="button" value="Add New Player" style={{ width: '100%' }} />
             </form>
         );
