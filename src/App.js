@@ -1,15 +1,17 @@
 import React from 'react';
-// import { Link } from 'react-router';
-import Sidebar from './components/Sidebar';
+
+import './sass/App.scss';
 
 const App = React.createClass({
-    render(){
+    render() {
         return (
             <div>
-                <Sidebar />
+                {React.cloneElement(this.props.children, {
+                    key: this.props.location.pathname
+                })}
             </div>
         )
     }
-})
+});
 
 export default App
