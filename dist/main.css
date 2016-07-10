@@ -13,8 +13,8 @@ input {
 
 body {
   background-color: #D8D8D8;
-  padding-top: 70px;
-  height: calc(100% - 70px);
+  padding-top: 50px;
+  height: calc(100% - 50px);
   overflow-x: hidden; }
 
 #dice-template {
@@ -63,8 +63,7 @@ body {
   top: 0;
   left: 0;
   width: 100%;
-  z-index: 500;
-  padding-top: 20px; }
+  z-index: 500; }
   .title-bar h2 {
     color: #fff;
     margin: 0;
@@ -72,9 +71,9 @@ body {
 
 .title-bar__back {
   position: absolute;
-  top: 20px;
+  top: 0;
   left: 0;
-  height: calc(100% - 20px);
+  height: 100%;
   display: flex;
   align-items: center;
   padding: 0 10px; }
@@ -216,7 +215,7 @@ body {
 
 .message {
   width: 95%;
-  margin: 10px auto;
+  margin: 10px 0;
   box-sizing: border-box; }
   .message h2, .message h3, .message h4, .message p {
     font-family: 'Lato', sans-serif;
