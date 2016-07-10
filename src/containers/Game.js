@@ -1,8 +1,11 @@
 import React from 'react';
+import Reflux from 'reflux';
 import { Link } from 'react-router';
 import _ from 'lodash';
 
 import history from '../history';
+
+import PlayersStore from '../stores/PlayersStore';
 
 import TitleBar from '../components/TitleBar';
 import ListItems from '../components/ListItems';
@@ -12,22 +15,9 @@ import Button from '../components/Button';
 
 const Game = React.createClass({
 
-    getInitialState() {
-        return {
-            players: [
-                {
-                    first_name: 'Jon',
-                    last_name: 'Stuebe',
-                    points: 0,
-                },
-                {
-                    first_name: 'Kevin',
-                    last_name: 'Platt',
-                    points: 0,
-                }
-            ]
-        }
-    },
+    mixins: [
+        Reflux.connect(PlayersStore, 'players'),
+    ],
 
     getPlayerSlug(player) {
         return player.first_name.toLowerCase() + '-' + player.last_name.toLowerCase();
@@ -53,19 +43,12 @@ const Game = React.createClass({
 
     render(){
 
-        // const id = location.pathname.slice(1).split('/')[1];
-
         return (
             <div>
                 <TitleBar title="Game" back={'/players'} />
                 <ListItems>
                     {this.renderPlayers()}
                 </ListItems>
-                { /*
-                <BottomDrawer>
-                    <Button to={`${location.pathname} start/`} light={false}>play turn</Button>
-                </BottomDrawer>
-                */ }
             </div>
         )
     }

@@ -1,5 +1,9 @@
 import React from 'react';
+import Reflux from 'reflux';
 import history from '../history';
+
+import PlayersStore from '../stores/PlayersStore';
+import PlayersActions from '../actions/PlayersActions';
 
 import TitleBar from '../components/TitleBar';
 import ListItems from '../components/ListItems';
@@ -14,15 +18,20 @@ const Turn = React.createClass({
         return str.replace(/\w\S*/g, function(txt){return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();});
     },
 
+    mixins: [Reflux.connectFilter(PlayersStore, 'player', function(players) {
+        return players.filter(function(player) {
+           return this.props.params.player === `${player.first_name.toLowerCase()}-${player.last_name.toLowerCase()}`;
+        }.bind(this))[0];
+    })],
+
     getInitialState() {
         return {
             turnActive: false,
-            turns: [300, 700],
         };
     },
     getTotal() {
         let total = 0;
-        this.state.turns.map((points) => {
+        this.state.player.turns.map((points) => {
             total = total + Number(points);
         });
         return total;
@@ -44,9 +53,8 @@ const Turn = React.createClass({
 
         if(ask) {
 
-            let turns = this.state.turns;
-            turns.push(total);
-            this.setState({ turns, turnActive: false });
+            PlayersActions.playTurn(this.state.player.first_name, this.state.player.last_name, total);
+            this.setState({ turnActive: false });
             history.pushState(null, '/game');
 
         }
@@ -54,7 +62,7 @@ const Turn = React.createClass({
     },
     renderTurns() {
 
-        let turns = this.state.turns.map((points, index) => {
+        let turns = this.state.player.turns.map((points, index) => {
 
             return (
                 <div className='turn' key={index}>
@@ -107,7 +115,7 @@ const Turn = React.createClass({
     },
     render(){
 
-        const name = location.pathname.slice(1).split('/')[1].split('-');
+        const name = this.props.params.player.split('-');
         const first_name = name[0];
         const last_name = name[1];
 

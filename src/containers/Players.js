@@ -2,8 +2,9 @@ import React from 'react';
 import { Link } from 'react-router';
 
 import Reflux from 'reflux';
-import Actions from '../actions/Actions';
-// import PlayersStore from '../stores/PlayersStore';
+// import Actions from '../actions/Actions';
+import PlayersStore from '../stores/PlayersStore';
+import PlayersActions from '../actions/PlayersActions';
 
 import TitleBar from '../components/TitleBar';
 import ListItems from '../components/ListItems';
@@ -15,34 +16,15 @@ import Button from '../components/Button';
 const Players = React.createClass({
 
     mixins: [
-        // Reflux.connect(PlayersStore, 'players'),
+        Reflux.connect(PlayersStore, 'players'),
     ],
-
-    getInitialState() {
-        return {
-            players: [],
-        }
-    },
-
-    componentWillMount() {
-
-
-    },
 
     addNewPlayer(e) {
 
         let first_name = this.refs.first_name.value,
             last_name = this.refs.last_name.value;
 
-        let players = this.state.players;
-
-        players.push({
-            first_name,
-            last_name,
-            points: 0,
-        });
-
-        this.setState({ players });
+        PlayersActions.addPlayer(first_name, last_name);
 
         this.refs.first_name.value = '';
         this.refs.last_name.value = '';
