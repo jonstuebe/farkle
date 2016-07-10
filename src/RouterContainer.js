@@ -1,31 +1,33 @@
 import React, { Component } from 'react';
 
-import { createHistory, useBasename } from 'history';
-import { Router, Route, IndexRoute, Link } from 'react-router';
+import { Router, Route, IndexRoute, Link, browserHistory } from 'react-router';
+import history from './history';
 
 import App from './App';
 import Index from './containers/Index';
-import Games from './containers/Games';
+import Players from './containers/Players';
 import Game from './containers/Game';
 import Turn from './containers/Turn';
 
-const history = useBasename(createHistory)({
-  basename: ''
-})
-
 class RouterContainer extends Component {
+
+    renderRoutes() {
+        return (
+            <Route path="/" component={App}>
+                <IndexRoute component={Index} />
+                <Route path="players" component={Players} />
+                <Route path="game" component={Game} />
+                <Route path="player/:player" component={Turn} />
+            </Route>
+        );
+    }
+
     render() {
       return (
-        <Router history={history}>
-          <Router path="/" component={App}>
-              <IndexRoute component={Index} />
-              <Route path="games" component={Games} />
-              <Route path="game/:gameID" component={Game} />
-              <Route path="game/:gameID/:player" component={Turn} />
-          </Router>
-        </Router>
+        <Router history={history} routes={this.renderRoutes()} />
       )
     }
+
 }
 
 export default RouterContainer

@@ -1,7 +1,9 @@
 var path = require('path');
+var precss = require('precss');
 var autoprefixer = require('autoprefixer');
 var webpack = require('webpack');
 var ExtractTextPlugin = require('extract-text-webpack-plugin');
+var NpmInstallPlugin = require('npm-install-webpack-plugin');
 
 module.exports = {
     devtool: 'cheap-module-eval-source-map',
@@ -18,13 +20,20 @@ module.exports = {
     plugins: [
         new webpack.HotModuleReplacementPlugin(),
         new webpack.NoErrorsPlugin(),
-        new ExtractTextPlugin('[name].css')
+        new ExtractTextPlugin('[name].css'),
+        new NpmInstallPlugin({
+            dev: function(module, path) {
+                return [
+                    'babel-preset-react-hmre',
+                    'webpack-dev-middleware',
+                    'webpack-hot-middleware',
+                ].indexOf(module) !== -1;
+            },
+        }),
     ],
-    postcss: [
-        autoprefixer({
-          browsers: ['last 2 versions']
-        })
-    ],
+    postcss: function() {
+        return [precss, autoprefixer];
+    },
     module: {
     	loaders: [
         	{
@@ -34,7 +43,7 @@ module.exports = {
         	},
             {
                 test: /\.css$/,
-                loader: ExtractTextPlugin.extract("style-loader","css-loader")
+                loader: ExtractTextPlugin.extract('style-loader','css-loader','postcss-loader')
             },
             {
                 test: /\.scss$/,

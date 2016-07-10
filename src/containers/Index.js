@@ -7,8 +7,7 @@ const Index = React.createClass({
         return (
             <div className='splash'>
                 <h1 className='splash__title'><span>Farkl</span><span>e</span></h1>
-
-                <Button to={'/games'} style={{ position: 'fixed', bottom: 20, width: '100%' }}>Games</Button>
+                <Button to={'/players'} style={{ position: 'fixed', bottom: 20, width: '100%' }}>Start New Game</Button>
             </div>
         )
     }
