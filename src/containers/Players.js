@@ -95,7 +95,7 @@ const Players = React.createClass({
     render(){
         return (
             <div>
-                <TitleBar title="Players" back={false} />
+                <TitleBar title="Players" back={'/'} />
                 {this.renderPlayers()}
 
                 <BottomDrawer>

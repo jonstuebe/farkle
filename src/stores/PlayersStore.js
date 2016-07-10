@@ -41,6 +41,15 @@ const PlayersStore = Reflux.createStore({
 
     },
 
+    onRemoveAll() {
+
+        let players = this.players;
+        players = [];
+
+        this.updateStore(players);
+
+    },
+
     updateStore(players) {
         localStorage.setItem(localStorageKey, JSON.stringify(players));
         this.trigger(players);

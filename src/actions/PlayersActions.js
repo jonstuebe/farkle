@@ -5,6 +5,7 @@ const PlayersActions = Reflux.createActions([
     'removePlayer',
     'editPlayer',
     'playTurn',
+    'removeAll',
 ]);
 
 export default PlayersActions;
