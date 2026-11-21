@@ -3,7 +3,16 @@ import { CuboidCollider, RigidBody } from "@react-three/rapier";
 import { MeshPhysicalMaterial, MeshStandardMaterial } from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { getFeltTextures, getWoodTexture } from "./textures";
-import { RAIL_HEIGHT, RAIL_THICKNESS, TRAY_DEPTH, TRAY_WIDTH, WALL_HEIGHT } from "./tray";
+import {
+  DIVIDER_HEIGHT,
+  DIVIDER_THICKNESS,
+  DIVIDER_Z,
+  RAIL_HEIGHT,
+  RAIL_THICKNESS,
+  TRAY_DEPTH,
+  TRAY_WIDTH,
+  WALL_HEIGHT,
+} from "./tray";
 
 const FLOOR_THICKNESS = 0.5;
 /** How far the rail's base sinks below the felt, hiding the seam. */
@@ -17,7 +26,7 @@ const RAIL_Y = (RAIL_HEIGHT - RAIL_SINK) / 2;
  * footprint, which continue invisibly upwards so no die can leave the table.
  */
 export function Table() {
-  const { felt, wood, tabletop, longRail, shortRail } = useMemo(() => {
+  const { felt, wood, tabletop, longRail, shortRail, divider } = useMemo(() => {
     const feltTextures = getFeltTextures();
     const woodMap = getWoodTexture();
     const railHeight = RAIL_HEIGHT + RAIL_SINK;
@@ -44,6 +53,8 @@ export function Table() {
       // Both rail shapes are built long-along-X so the grain follows the rail.
       longRail: new RoundedBoxGeometry(TRAY_WIDTH + RAIL_THICKNESS * 2, railHeight, RAIL_THICKNESS, 4, 0.14),
       shortRail: new RoundedBoxGeometry(TRAY_DEPTH + RAIL_THICKNESS, railHeight, RAIL_THICKNESS, 4, 0.14),
+      // Low fence between the play area and the kept-dice lane.
+      divider: new RoundedBoxGeometry(TRAY_WIDTH + 0.1, DIVIDER_HEIGHT + RAIL_SINK, DIVIDER_THICKNESS, 3, 0.05),
     };
   }, []);
 
@@ -110,6 +121,20 @@ export function Table() {
         <CuboidCollider
           args={[HALF_W + RAIL_THICKNESS, WALL_HEIGHT / 2, RAIL_THICKNESS / 2]}
           position={[0, WALL_HEIGHT / 2, -railZ]}
+          friction={0.3}
+          restitution={0.45}
+        />
+        <mesh
+          castShadow
+          receiveShadow
+          position={[0, (DIVIDER_HEIGHT - RAIL_SINK) / 2, DIVIDER_Z]}
+          geometry={divider}
+          material={wood}
+        />
+        {/* The divider's collider is full height, like the rails: thrown dice stay out of the lane. */}
+        <CuboidCollider
+          args={[HALF_W, WALL_HEIGHT / 2, DIVIDER_THICKNESS / 2]}
+          position={[0, WALL_HEIGHT / 2, DIVIDER_Z]}
           friction={0.3}
           restitution={0.45}
         />

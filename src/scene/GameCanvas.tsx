@@ -2,15 +2,12 @@ import { Canvas } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
 import { ACESFilmicToneMapping, SRGBColorSpace } from "three";
 import { Table } from "./Table";
-import { Die } from "./Die";
+import { DiceSet } from "./DiceSet";
 import { Lighting } from "./Lighting";
 import { CameraRig } from "./CameraRig";
 import { GRAVITY } from "./tray";
 
-/**
- * The 3D game view. STUB: renders six free dice; the scene worker replaces the dice with a
- * game-driven dice set (see the scene task spec).
- */
+/** The 3D game view: the tray, lighting, and the dice driven by the game machine. */
 export function GameCanvas() {
   return (
     <Canvas
@@ -29,9 +26,7 @@ export function GameCanvas() {
       <Lighting />
       <Physics gravity={GRAVITY}>
         <Table />
-        {Array.from({ length: 6 }, (_, i) => (
-          <Die key={i} index={i} />
-        ))}
+        <DiceSet />
       </Physics>
     </Canvas>
   );
