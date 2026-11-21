@@ -17,7 +17,8 @@
  *   useThrowSettled()(seq). If useSnapCount() changes, seat the dice from context immediately.
  *
  *   Replay (HUD): const { replaying, fed, total, skip } = useReplay();
- *   Seats: useMySeats() -> seats this device plays (all of them locally).
+ *   Seats: useMySeats() -> seats this device plays (all of them locally);
+ *          useSeatPresence() -> online per-seat connected flags (null locally).
  *   Session: useGameSession() -> { kind: "local" | "online", connected, gameNumber }.
  *
  * App-level actions (restart / leave the game), for the HUD and the game-over screen:
@@ -109,6 +110,9 @@ export function useReplay() {
 }
 
 export const useMySeats = () => useSessionState((s) => s.mySeats);
+
+/** Online: per-seat "connected right now" flags. Null for local games. */
+export const useSeatPresence = () => useSessionState((s) => s.presence);
 
 export function useGameSession() {
   const kind = useRuntime().session.kind;

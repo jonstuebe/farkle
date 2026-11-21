@@ -23,6 +23,8 @@ export interface SessionState {
   seenFrom: number;
   /** Online only: false while reconnecting. Local sessions are always connected. */
   connected: boolean;
+  /** Online only: which seats have an open connection right now (null for local games). */
+  presence: readonly boolean[] | null;
 }
 
 export interface GameSession {
@@ -48,7 +50,7 @@ export interface LocalSessionOptions {
 export function createLocalSession({ input, log = [], gameNumber = 1, onChange }: LocalSessionOptions): GameSession {
   const listeners = new Set<() => void>();
   const allSeats = input.players.map((_, i) => i);
-  let state: SessionState = { gameNumber, input, log, mySeats: allSeats, seenFrom: log.length, connected: true };
+  let state: SessionState = { gameNumber, input, log, mySeats: allSeats, seenFrom: log.length, connected: true, presence: null };
   let snapshot = replayLog(input, log);
 
   const commit = (next: SessionState) => {

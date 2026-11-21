@@ -22,7 +22,7 @@ function scriptedLog(steps: Array<[Intent, DieValue[]?]>): LogEntry[] {
 /** A session whose log the test controls, standing in for an online session. */
 function fakeSession(initial: Partial<SessionState> & { log: LogEntry[] }) {
   const listeners = new Set<() => void>();
-  let state: SessionState = { gameNumber: 1, input, mySeats: [1], seenFrom: 0, connected: true, ...initial };
+  let state: SessionState = { gameNumber: 1, input, mySeats: [1], seenFrom: 0, connected: true, presence: [true, true], ...initial };
   const seen: number[] = [];
   const session: GameSession = {
     kind: "online",
