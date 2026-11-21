@@ -303,6 +303,43 @@ describe("leaving the lobby", () => {
     expect(socket.sent.filter((m) => (m as { type: string }).type === "leave")).toHaveLength(1);
   });
 
+  test("leaving in one tab ends the other tab of the same device too, without reconnecting", () => {
+    const t = setup();
+    const host = t.connect(HOST, "Ada", "host");
+    const tabA = t.connect(BO, "Bo");
+    const tabB = t.connect(BO, "Bo");
+    expect(tabB.getRoom()).toMatchObject({ status: "open", seat: 1 });
+    expect(host.getRoom().room?.seats).toHaveLength(2);
+    let notified = 0;
+    tabB.subscribe(() => notified++);
+
+    tabA.leave();
+    t.settle();
+    expect(tabB.getRoom()).toMatchObject({ status: "closed", error: "left" });
+    expect(tabB.getState().connected).toBe(false);
+    expect(notified).toBeGreaterThan(0);
+
+    const sockets = t.server.sockets.length;
+    t.emitWake("visible");
+    t.emitWake("online");
+    t.settle(120_000);
+    expect(t.server.sockets).toHaveLength(sockets);
+    expect(t.clock.pending).toBe(0);
+    expect(t.server.room!.seats.map((seat) => seat.name)).toEqual(["Ada"]);
+    expect(host.getRoom().room?.seats).toEqual([{ name: "Ada", connected: true }]);
+  });
+
+  test("an ordinary close with code 1000 still reconnects", () => {
+    const t = setup();
+    t.connect(HOST, "Ada", "host");
+    const bo = t.connect(BO, "Bo");
+    const first = t.server.socketOf(BO)!;
+    t.server.drop(first, 1000);
+    t.settle(RECONNECT_MAX_MS);
+    expect(t.server.socketOf(BO)).not.toBe(first);
+    expect(bo.getRoom()).toMatchObject({ status: "open", seat: 1, error: null });
+  });
+
   test("the host and players in a started game never send `leave`", () => {
     const t = setup();
     const host = t.connect(HOST, "Ada", "host");

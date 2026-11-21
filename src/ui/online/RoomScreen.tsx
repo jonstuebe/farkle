@@ -35,6 +35,7 @@ const ERRORS: Record<RoomError, { title: string; body: string }> = {
     body: "It began before you joined, so there's no seat for this device. If you were playing on another phone or browser, open it there.",
   },
   expired: { title: "This game has expired", body: "Nobody played for a while, so it was put away." },
+  left: { title: "You left this game", body: "Your seat was given up. The invite link will get you back in while the game hasn't started." },
   cancelled: { title: "The invite was cancelled", body: "This game was called off before it started." },
 };
 

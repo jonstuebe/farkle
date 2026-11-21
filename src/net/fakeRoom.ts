@@ -31,7 +31,7 @@ export class FakeSocket implements SocketLike {
   readyState = CONNECTING;
   onopen: ((event: unknown) => void) | null = null;
   onmessage: ((event: { data: unknown }) => void) | null = null;
-  onclose: ((event: { code: number }) => void) | null = null;
+  onclose: ((event: { code: number; reason?: string }) => void) | null = null;
   onerror: ((event: unknown) => void) | null = null;
   /** Everything the client sent on this socket, parsed. */
   readonly sent: unknown[] = [];
@@ -162,7 +162,7 @@ export class FakeRoomServer {
           if (after === null) {
             s.seat = null;
             s.readyState = CLOSED;
-            this.queue.push(() => s.onclose?.({ code: 1000 }));
+            this.queue.push(() => s.onclose?.({ code: 1000, reason: "Left" }));
           } else s.seat = after;
         }
         for (const s of this.openSockets) this.sendRoom(s);
@@ -194,10 +194,7 @@ export class FakeRoomServer {
     }
     const changed = seating.room !== this.room;
     this.room = seating.room;
-    // One socket per seat: a newer connection replaces the older one.
-    for (const other of this.openSockets) {
-      if (other !== socket && other.seat === seating.seat) this.drop(other, 1000);
-    }
+    // Like the real room, a device may have several sockets on its seat (two tabs).
     socket.seat = seating.seat;
     for (const s of this.openSockets) {
       if (s === socket || changed) this.sendRoom(s);

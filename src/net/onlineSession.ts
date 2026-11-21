@@ -38,7 +38,15 @@ import {
 } from "./protocol";
 
 /** Why the room can't be used. Final: the session does not reconnect after one of these. */
-export type RoomError = Refusal | "expired" | "cancelled";
+export type RoomError =
+  | Refusal
+  | "expired"
+  | "cancelled"
+  /** This device gave up its lobby seat (here or in another tab). */
+  | "left";
+
+/** Close reason the server uses, with code 1000, for the sockets of a device that left the lobby. */
+export const CLOSE_REASON_LEFT = "Left";
 
 export type ConnectionStatus =
   /** First connection attempt, nothing received yet. */
@@ -90,7 +98,7 @@ export interface SocketLike {
   close(code?: number, reason?: string): void;
   onopen: ((event: unknown) => void) | null;
   onmessage: ((event: { data: unknown }) => void) | null;
-  onclose: ((event: { code: number }) => void) | null;
+  onclose: ((event: { code: number; reason?: string }) => void) | null;
   onerror: ((event: unknown) => void) | null;
 }
 
@@ -372,6 +380,8 @@ export function createOnlineSession(options: OnlineSessionOptions): OnlineSessio
       if (event.code === CLOSE_EXPIRED) finish("expired");
       else if (event.code === CLOSE_CANCELLED) finish("cancelled");
       else if (event.code === CLOSE_REFUSED) finish(roomState.error ?? "missing");
+      // Left from another tab of this device: reconnecting would take a seat again.
+      else if (event.code === 1000 && event.reason === CLOSE_REASON_LEFT) finish("left");
       else lost();
     };
     created.onerror = () => {
