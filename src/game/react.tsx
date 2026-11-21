@@ -1,45 +1,126 @@
 /**
  * React bindings for the game. Everything UI code needs from the game lives here.
  *
- * Game state (inside `<FarkleContext.Provider>`, including inside the R3F `<Canvas>`):
- *   const score = useGameSelector((snapshot) => snapshot.context.players[0]?.score);
- *   const actor = useGameActor();   actor.send({ type: "roll" });
+ * Inside <GameProvider> (also inside the R3F <Canvas>, which bridges context):
+ *
+ *   Reading the presented game (what the player is watching, which may lag the authoritative log
+ *   during throw animations and replays):
+ *     const score = useGameSelector((snapshot) => snapshot.context.players[0]?.score);
+ *     const actor = useGameActor();   // the presented actor, for subscribe()/getSnapshot() only
+ *
+ *   Acting (never send events to the actor directly; it is fed by the Presenter):
+ *     const sendIntent = useGameIntent();   sendIntent({ type: "roll" })
+ *     const canAct = useCanAct();           // my seat's turn, connected, nothing playing out
+ *
+ *   Throw hand-off (scene): usePendingThrow() gives { seq, indices, values } while a throw must
+ *   be animated; land each die in `indices` on its `values` entry, then call
+ *   useThrowSettled()(seq). If useSnapCount() changes, seat the dice from context immediately.
+ *
+ *   Replay (HUD): const { replaying, fed, total, skip } = useReplay();
+ *   Seats: useMySeats() -> seats this device plays (all of them locally).
+ *   Session: useGameSession() -> { kind: "local" | "online", connected, gameNumber }.
  *
  * App-level actions (restart / leave the game), for the HUD and the game-over screen:
  *   const { playAgain, newGame } = useAppActions();
- *     playAgain()  start a fresh game right away with the same players and rules
- *                  (scores reset, saved game replaced). Use for "Play again" / "Rematch".
- *     newGame()    leave to the setup screen to change players or rules. Same thing as the
- *                  `onNewGame` prop of `<Hud>`. A game still in progress stays saved and is
- *                  offered there as "Resume game"; a finished one is not.
+ *     playAgain()  local: start a fresh game with the same players and rules.
+ *                  online: ask the room for a rematch.
+ *     newGame()    leave to the home/setup screen.
  *   Both are stable callbacks, safe to call from event handlers at any time. Outside of
  *   `<App>` (tests, stories) they are no-ops.
- *
- * Save/resume is automatic (see `./persistence.ts`); UI code does not need to do anything.
- * One consequence for the scene: a game can start in any settled state (`awaitingRoll`,
- * `choosing`, `farkled`) with dice values and held flags already in context, never in `rolling`.
  */
-import { createContext, useContext } from "react";
+import { createContext, useCallback, useContext, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import { createActorContext } from "@xstate/react";
 import { farkleMachine } from "./machine";
+import type { Intent } from "./log";
+import type { Presenter, PresenterView } from "./presenter";
+import type { GameSession, SessionState } from "./session";
 
-/**
- * The one game actor shared by the 3D scene and the HUD.
- * R3F v9 bridges React context into <Canvas>, so scene components can use these hooks too.
- * The provider takes `actor` (a new or restored actor, created once by `<App>`).
- */
+/** The presented game actor. Provided by <GameProvider>; don't send events to it. */
 export const FarkleContext = createActorContext(farkleMachine);
 
-/** Read derived game state; re-renders only when the selected value changes. */
+/** Read derived presented-game state; re-renders only when the selected value changes. */
 export const useGameSelector = FarkleContext.useSelector;
 
-/** The game actor, for sending events: `useGameActor().send({ type: "roll" })`. */
+/** The presented game actor (subscribe / getSnapshot). Act with useGameIntent instead of send. */
 export const useGameActor = FarkleContext.useActorRef;
 
+interface GameRuntime {
+  session: GameSession;
+  presenter: Presenter;
+}
+
+const GameRuntimeContext = createContext<GameRuntime | null>(null);
+
+function useRuntime(): GameRuntime {
+  const runtime = useContext(GameRuntimeContext);
+  if (!runtime) throw new Error("Game hooks must be used inside <GameProvider>");
+  return runtime;
+}
+
+/** Provides one game (session + presenter). Remount (change `key`) for a new game number. */
+export function GameProvider({ session, presenter, children }: GameRuntime & { children: ReactNode }) {
+  const runtime = useMemo(() => ({ session, presenter }), [session, presenter]);
+  return (
+    <GameRuntimeContext.Provider value={runtime}>
+      <FarkleContext.Provider actor={presenter.actor}>{children}</FarkleContext.Provider>
+    </GameRuntimeContext.Provider>
+  );
+}
+
+function usePresenterView<T>(select: (view: PresenterView) => T): T {
+  const { presenter } = useRuntime();
+  return useSyncExternalStore(presenter.subscribe, () => select(presenter.getView()));
+}
+
+function useSessionState<T>(select: (state: SessionState) => T): T {
+  const { session } = useRuntime();
+  return useSyncExternalStore(session.subscribe, () => select(session.getState()));
+}
+
+/** Send a move for the current player. Ignored by the session if it isn't allowed. */
+export function useGameIntent(): (intent: Intent) => void {
+  const { session } = useRuntime();
+  return useCallback((intent: Intent) => session.sendIntent(intent), [session]);
+}
+
+/** True when this device may act right now (its seat's turn and nothing still playing out). */
+export function useCanAct(): boolean {
+  const { presenter } = useRuntime();
+  // Re-evaluate on presenter, session and presented-actor changes.
+  usePresenterView((v) => v);
+  useSessionState((s) => s);
+  useGameSelector((s) => s);
+  return presenter.canAct();
+}
+
+export const usePendingThrow = () => usePresenterView((v) => v.pendingThrow);
+export const useSnapCount = () => usePresenterView((v) => v.snapCount);
+
+export function useThrowSettled(): (seq: number) => void {
+  return useRuntime().presenter.throwSettled;
+}
+
+export function useReplay() {
+  const { presenter } = useRuntime();
+  const replaying = usePresenterView((v) => v.replaying);
+  const fed = usePresenterView((v) => v.fed);
+  const total = usePresenterView((v) => v.total);
+  return { replaying, fed, total, skip: presenter.skip };
+}
+
+export const useMySeats = () => useSessionState((s) => s.mySeats);
+
+export function useGameSession() {
+  const kind = useRuntime().session.kind;
+  const connected = useSessionState((s) => s.connected);
+  const gameNumber = useSessionState((s) => s.gameNumber);
+  return { kind, connected, gameNumber };
+}
+
 export interface AppActions {
-  /** Start a new game immediately with the same players and rules. */
+  /** Local: new game with the same players and rules. Online: request a rematch. */
   playAgain: () => void;
-  /** Go back to the setup screen. */
+  /** Go back to the home/setup screen. */
   newGame: () => void;
 }
 

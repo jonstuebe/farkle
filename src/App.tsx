@@ -1,16 +1,9 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import type { GameInput } from "./game/machine";
-import {
-  clearSavedGame,
-  createGame,
-  loadSavedGame,
-  persistGame,
-  restoreGame,
-  summarizeSavedGame,
-  type GameActor,
-  type SavedGame,
-} from "./game/persistence";
-import { AppActionsContext, FarkleContext, type AppActions } from "./game/react";
+import { clearSavedGame, loadSavedGame, persistSession, summarizeSavedGame, type SavedGame } from "./game/persistence";
+import { AppActionsContext, GameProvider, type AppActions } from "./game/react";
+import { createLocalSession, type GameSession } from "./game/session";
+import { Presenter } from "./game/presenter";
 import { Hud } from "./ui/hud/Hud";
 import { SetupScreen } from "./ui/setup/SetupScreen";
 import { MuteButton } from "./audio/MuteButton";
@@ -19,7 +12,9 @@ import { MuteButton } from "./audio/MuteButton";
 const loadScene = () => import("./scene/GameCanvas");
 const GameCanvas = lazy(() => loadScene().then((m) => ({ default: m.GameCanvas })));
 
-type Screen = { kind: "setup" } | { kind: "playing"; input: GameInput; actor: GameActor; gameId: number };
+type Screen =
+  | { kind: "setup" }
+  | { kind: "playing"; input: GameInput; session: GameSession; presenter: Presenter; gameId: number };
 
 let nextGameId = 1;
 
@@ -38,28 +33,47 @@ export function App() {
     return () => clearTimeout(id);
   }, []);
 
-  const start = useCallback((input: GameInput) => {
-    clearSavedGame();
-    setSaved(null);
-    setScreen({ kind: "playing", input, actor: createGame(input), gameId: nextGameId++ });
+  // Session + presenter are created in event handlers (never during render, so StrictMode can't
+  // double them) and the previous game's presenter is stopped when the screen changes.
+  const show = useCallback((next: Screen) => {
+    setScreen((current) => {
+      if (current.kind === "playing" && current !== next) current.presenter.stop();
+      return next;
+    });
   }, []);
+
+  const open = useCallback(
+    (input: GameInput, saved?: SavedGame) => {
+      const session = createLocalSession({ input, log: saved?.log ?? [] });
+      show({ kind: "playing", input, session, presenter: new Presenter(session), gameId: nextGameId++ });
+    },
+    [show],
+  );
+
+  const start = useCallback(
+    (input: GameInput) => {
+      clearSavedGame();
+      setSaved(null);
+      open(input);
+    },
+    [open],
+  );
 
   const resume = useCallback(() => {
     const game = loadSavedGame();
-    const actor = game && restoreGame(game);
-    if (!game || !actor) {
+    if (!game) {
       clearSavedGame();
       setSaved(null);
       return;
     }
-    setScreen({ kind: "playing", input: game.input, actor, gameId: nextGameId++ });
-  }, []);
+    open(game.input, game);
+  }, [open]);
 
   const newGame = useCallback(() => {
     // A game that is still running was saved on its last change; offer it back on the setup screen.
     setSaved(loadSavedGame());
-    setScreen({ kind: "setup" });
-  }, []);
+    show({ kind: "setup" });
+  }, [show]);
 
   const currentInput = screen.kind === "playing" ? screen.input : null;
   const actions = useMemo<AppActions>(
@@ -75,7 +89,7 @@ export function App() {
         <SetupScreen onStart={start} savedGame={savedSummary} onResume={resume} />
       ) : (
         <AppActionsContext.Provider value={actions}>
-          <GameView key={screen.gameId} actor={screen.actor} input={screen.input} onNewGame={newGame} />
+          <GameView key={screen.gameId} session={screen.session} presenter={screen.presenter} onNewGame={newGame} />
         </AppActionsContext.Provider>
       )}
       <MuteButton />
@@ -84,17 +98,17 @@ export function App() {
 }
 
 interface GameViewProps {
-  actor: GameActor;
-  input: GameInput;
+  session: GameSession;
+  presenter: Presenter;
   onNewGame: () => void;
 }
 
-function GameView({ actor, input, onNewGame }: GameViewProps) {
-  // Mirror the game into localStorage for as long as this view is mounted.
-  useEffect(() => persistGame(actor, input), [actor, input]);
+function GameView({ session, presenter, onNewGame }: GameViewProps) {
+  // Mirror the local game into localStorage for as long as this view is mounted.
+  useEffect(() => (session.kind === "local" ? persistSession(session) : undefined), [session]);
 
   return (
-    <FarkleContext.Provider actor={actor}>
+    <GameProvider session={session} presenter={presenter}>
       <div className="app-game">
         <Suspense fallback={<LoadingScreen />}>
           <GameCanvas />
@@ -102,7 +116,7 @@ function GameView({ actor, input, onNewGame }: GameViewProps) {
           <div className="app-curtain" aria-hidden="true" />
         </Suspense>
       </div>
-    </FarkleContext.Provider>
+    </GameProvider>
   );
 }
 

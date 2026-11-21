@@ -3,7 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import { Euler, Quaternion } from "three";
 import { playSelect } from "../audio/sfx";
 import { freeDiceIndices, type Die as GameDie } from "../game/machine";
-import { useGameActor, useGameSelector } from "../game/react";
+import { useCanAct, useGameActor, useGameIntent, useGameSelector, usePendingThrow, useThrowSettled } from "../game/react";
 import { Die, type DieHandle } from "./Die";
 import {
   assignHeldSlots,
@@ -85,6 +85,16 @@ interface Seen {
  */
 export function DiceSet() {
   const actor = useGameActor();
+  const sendIntent = useGameIntent();
+  const throwSettled = useThrowSettled();
+  // INTERIM (coordinator): dice values now come from the log, not the physics. Until the scene
+  // lands dice on `pendingThrow.values`, a settled throw just reports back to the presenter.
+  const pendingThrow = usePendingThrow();
+  const pendingRef = useRef(pendingThrow);
+  pendingRef.current = pendingThrow;
+  const canAct = useCanAct();
+  const canActRef = useRef(canAct);
+  canActRef.current = canAct;
   const handles = useRef<(DieHandle | null)[]>([]);
   const seen = useRef<Seen>({ phase: null, dice: null, slots: [], entries: 0 });
   // Counts every entry into `playing.rolling`, straight from the actor. The frame loop can
@@ -126,11 +136,12 @@ export function DiceSet() {
     (index: number) => {
       const snapshot = actor.getSnapshot();
       const die = snapshot.context.dice[index];
+      if (!canActRef.current) return;
       if (phaseOf(snapshot.value) !== "choosing" || !die || die.held || die.value === null) return;
       playSelect(!snapshot.context.selected.includes(index));
-      actor.send({ type: "toggleDie", index });
+      sendIntent({ type: "toggleDie", index });
     },
-    [actor],
+    [actor, sendIntent],
   );
 
   useFrame((_, rawDelta) => {
@@ -214,7 +225,8 @@ export function DiceSet() {
       if (!result) return;
       stats.rolledSent += 1;
       if (forced) stats.forced += 1;
-      actor.send({ type: "rolled", values: result });
+      const pending = pendingRef.current;
+      if (pending) throwSettled(pending.seq);
     };
 
     // Rolling with no throw on record should be impossible; recover rather than hang.

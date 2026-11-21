@@ -1,22 +1,27 @@
 import { useEffect, useRef } from "react";
 import { pendingTurnTotal, selectionScore } from "../../game/machine";
-import type { useGameActor } from "../../game/react";
+import type { Intent } from "../../game/log";
 import { actionsFor, formatPoints, needsEntry, turnHint, type ActionButton, type HudView } from "./logic";
 
-type Send = ReturnType<typeof useGameActor>["send"];
+type Send = (intent: Intent) => void;
 
 export interface DockProps {
   view: HudView;
   send: Send;
+  /** False while it isn't this device's turn or a throw/replay is still playing out. */
+  canAct: boolean;
   /** Off while another layer (the scoring panel) has the keyboard. */
   shortcutsEnabled: boolean;
 }
 
 /** Bottom of the screen: whose turn it is, what the turn is worth, and the action buttons. */
-export function Dock({ view, send, shortcutsEnabled }: DockProps) {
+export function Dock({ view, send, canAct, shortcutsEnabled }: DockProps) {
   const { phase, context } = view;
   const player = context.players[context.current];
-  const actions = actionsFor(view);
+  // INTERIM (coordinator): disable everything while this device may not act.
+  const raw = actionsFor(view);
+  const gate = (a: ActionButton | null) => (a && !canAct ? { ...a, enabled: false } : a);
+  const actions = { ...raw, primary: gate(raw.primary)!, bank: gate(raw.bank) };
   const hint = turnHint(view);
   const selection = phase === "choosing" ? selectionScore(context) : null;
   const invalidPick = phase === "choosing" && context.selected.length > 0 && selection === null;
