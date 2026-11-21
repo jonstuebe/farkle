@@ -280,6 +280,62 @@ describe("lobby", () => {
   });
 });
 
+describe("leaving the lobby", () => {
+  test("a guest's leave() sends `leave` and closes for good", () => {
+    const t = setup();
+    t.connect(HOST, "Ada", "host");
+    const bo = t.connect(BO, "Bo");
+    const socket = t.server.socketOf(BO)!;
+    bo.leave();
+    expect(socket.sent.at(-1)).toEqual({ type: "leave" });
+    expect(socket.closedByClient).toBe(true);
+    expect(bo.getRoom()).toMatchObject({ status: "closed", error: null });
+    const sockets = t.server.sockets.length;
+    t.settle(60_000);
+    expect(t.server.sockets).toHaveLength(sockets);
+    bo.leave(); // again: nothing
+    expect(socket.sent.filter((m) => (m as { type: string }).type === "leave")).toHaveLength(1);
+  });
+
+  test("the host and players in a started game never send `leave`", () => {
+    const t = setup();
+    const host = t.connect(HOST, "Ada", "host");
+    host.leave();
+    expect(t.server.socketOf(HOST)!.sent).not.toContainEqual({ type: "leave" });
+    expect(host.getRoom().status).toBe("closed");
+
+    const game = startedGame();
+    game.bo.leave();
+    expect(game.server.socketOf(BO)!.sent).not.toContainEqual({ type: "leave" });
+  });
+
+  test("the seat follows every room message: someone ahead leaving moves this device up", () => {
+    const t = setup();
+    const host = t.connect(HOST, "Ada", "host");
+    t.connect(BO, "Bo");
+    const cy = t.connect(CY, "Cy");
+    expect(cy.getRoom().seat).toBe(2);
+    expect(cy.getState().mySeats).toEqual([2]);
+
+    // Bo leaves: the server sends everyone the new seating, with Cy now in seat 1.
+    const seats = [
+      { name: "Ada", connected: true },
+      { name: "Cy", connected: true },
+    ];
+    const room = { phase: "lobby" as const, code: CODE, seats, rules: host.getState().input.rules! as never };
+    t.server.push(t.server.socketOf(CY)!, { type: "room", seat: 1, room });
+    t.server.push(t.server.socketOf(HOST)!, { type: "room", seat: 0, room });
+    t.settle();
+    expect(cy.getRoom()).toMatchObject({ status: "open", seat: 1 });
+    expect(cy.getState()).toMatchObject({ mySeats: [1], presence: [true, true], input: { players: ["Ada", "Cy"] } });
+    expect(host.getRoom().seat).toBe(0);
+    const mySeats = host.getState().mySeats;
+    t.server.push(t.server.socketOf(HOST)!, { type: "room", seat: 0, room });
+    t.settle();
+    expect(host.getState().mySeats).toBe(mySeats); // unchanged seat keeps its identity
+  });
+});
+
 describe("playing", () => {
   test("sendIntent carries the log length; entries arrive for everyone", () => {
     const { host, bo, server, settle } = startedGame();

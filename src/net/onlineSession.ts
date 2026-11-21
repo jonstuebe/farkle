@@ -19,6 +19,8 @@
  *  - Lost connections are retried with backoff. Coming back to the tab, or the network coming
  *    back, retries at once; after a long time hidden (a phone waking up) the socket is replaced
  *    even if it still looks open, because it often isn't.
+ *  - This device's seat is whatever the latest `room` message says: in the lobby a guest leaving
+ *    moves later seats up one.
  *  - `refused` and the server's close codes are final: `error` says why and nothing reconnects.
  */
 import type { GameInput } from "../game/machine";
@@ -70,6 +72,11 @@ export interface OnlineSession extends GameSession {
   configure(rules: LobbyRules): void;
   /** Host, lobby: start the game. */
   start(): void;
+  /**
+   * Guest, lobby: give up the seat and close. Best effort: if the socket is down right now the
+   * seat stays, and the invite link takes the player back to it.
+   */
+  leave(): void;
   /** After the game is over: ask for a new game with the same seats. */
   rematch(): void;
   /** Host, lobby: cancel the invite for everyone. Resolves false if the server said no. */
@@ -527,6 +534,12 @@ export function createOnlineSession(options: OnlineSessionOptions): OnlineSessio
     close() {
       if (closed) return;
       flushSeen();
+      finish(null);
+    },
+    leave() {
+      if (closed) return;
+      // Only a guest in the lobby has a seat to give up; the server ignores it otherwise.
+      if (roomState.room?.phase === "lobby" && roomState.seat !== 0) send({ type: "leave" });
       finish(null);
     },
     sendIntent(intent) {

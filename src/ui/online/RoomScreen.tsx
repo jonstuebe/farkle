@@ -151,9 +151,9 @@ export function RoomScreen({ code, host, deviceId, name, onHome, onJoinAnother, 
         }}
         onBack={onHome}
         onLeave={() => {
-          // There is no "give up my seat" message in the protocol: leaving takes the game off
-          // this device's list, and the seat stays (the invite link brings the player back).
-          session.close();
+          // Gives the seat up on the server (later seats move up) and takes the game off this
+          // device's list.
+          session.leave();
           forgetRoom(code);
           onHome();
         }}
