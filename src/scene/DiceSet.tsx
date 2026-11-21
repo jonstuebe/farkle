@@ -22,8 +22,25 @@ declare global {
   interface Window {
     /** Dev only: the game actor, for driving the game from the console or a test script. */
     __farkle?: unknown;
+    /** Dev only: lets tests check that every throw produced exactly one `rolled`. */
+    __farkleStats?: DiceStats;
   }
 }
+
+interface DiceStats {
+  /** Throws started (entries into `playing.rolling` the scene acted on). */
+  throws: number;
+  /** `rolled` events sent to the machine. */
+  rolledSent: number;
+  /** Throws resolved by the hard backstop instead of settling normally. */
+  forced: number;
+  /** Times cocked / stacked dice were kicked. */
+  nudges: number;
+  /** Test switch (dev builds only): ignore normal settling so only the backstop can resolve. */
+  holdSettle: boolean;
+}
+
+const stats: DiceStats = { throws: 0, rolledSent: 0, forced: 0, nudges: 0, holdSettle: false };
 
 const DICE = [0, 1, 2, 3, 4, 5] as const;
 
@@ -33,12 +50,19 @@ const SETTLE_SECONDS = 0.3;
 const THROW_TIMEOUT_SECONDS = 6;
 /** How many times cocked dice get kicked before we give up and read them as they lie. */
 const MAX_NUDGES = 3;
+/**
+ * Hard backstop: this long after a throw starts it is read as it lies, whatever state the
+ * dice are in. Measured in frame time (long stalls such as a hidden tab count as 0.25 s).
+ */
+const HARD_TIMEOUT_SECONDS = THROW_TIMEOUT_SECONDS + 1;
 
 interface ActiveThrow {
   /** Die indices in the air, ascending. */
   indices: number[];
   /** Seconds since the dice were released. */
   elapsed: number;
+  /** Seconds since the throw started, counting carried time too (for the hard backstop). */
+  age: number;
   stillFor: number;
   nudges: number;
   sent: boolean;
@@ -48,6 +72,8 @@ interface Seen {
   phase: Phase | null;
   dice: readonly GameDie[] | null;
   slots: (number | null)[];
+  /** Value of the rolling-entry counter this was recorded at. */
+  entries: number;
 }
 
 /**
@@ -60,7 +86,12 @@ interface Seen {
 export function DiceSet() {
   const actor = useGameActor();
   const handles = useRef<(DieHandle | null)[]>([]);
-  const seen = useRef<Seen>({ phase: null, dice: null, slots: [] });
+  const seen = useRef<Seen>({ phase: null, dice: null, slots: [], entries: 0 });
+  // Counts every entry into `playing.rolling`, straight from the actor. The frame loop can
+  // miss a phase entirely (a throw is resolved and the next one requested between two
+  // frames, e.g. a quick keypress during a hitch), so "phase changed" is not enough to
+  // know a new throw is due; this counter is.
+  const rollingEntries = useRef(0);
   const activeThrow = useRef<ActiveThrow | null>(null);
 
   // Render-side state: only what the dice need for interaction and highlights.
@@ -75,6 +106,21 @@ export function DiceSet() {
       if (window.__farkle === actor) delete window.__farkle;
     };
   }, [actor]);
+
+  useEffect(() => {
+    let previous = phaseOf(actor.getSnapshot().value);
+    const subscription = actor.subscribe((snapshot) => {
+      const next = phaseOf(snapshot.value);
+      if (next === "rolling" && previous !== "rolling") rollingEntries.current += 1;
+      previous = next;
+    });
+    return () => subscription.unsubscribe();
+  }, [actor]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    window.__farkleStats = stats;
+  }, []);
 
   const onToggle = useCallback(
     (index: number) => {
@@ -96,8 +142,9 @@ export function DiceSet() {
     const context = snapshot.context;
     const now = phaseOf(snapshot.value);
     const last = seen.current;
+    const entries = rollingEntries.current;
 
-    if (now !== last.phase || context.dice !== last.dice) {
+    if (now !== last.phase || context.dice !== last.dice || entries !== last.entries) {
       const first = last.phase === null;
       const slots = assignHeldSlots(last.slots, context.dice.map((d) => d.held));
 
@@ -122,7 +169,7 @@ export function DiceSet() {
         });
       }
 
-      if (now === "rolling" && last.phase !== "rolling") {
+      if (now === "rolling" && (entries !== last.entries || first)) {
         // Scoop the free dice into the "hand" and let them fly.
         const indices = freeDiceIndices(context);
         indices.forEach((index, n) => {
@@ -134,7 +181,8 @@ export function DiceSet() {
             launch,
           });
         });
-        activeThrow.current = { indices, elapsed: 0, stillFor: 0, nudges: 0, sent: false };
+        activeThrow.current = { indices, elapsed: 0, age: 0, stillFor: 0, nudges: 0, sent: false };
+        stats.throws += 1;
       } else if (now === "awaitingRoll" && last.phase !== "awaitingRoll" && !first) {
         // New turn: gather the free dice into the waiting row. (Mid-turn there is no way
         // back to awaitingRoll, so nothing is held here.)
@@ -143,12 +191,40 @@ export function DiceSet() {
           if (slots[i] == null) die(i).glideTo(readyPosition(i), { orientation: "square", duration: 0.5, arc: 0.9 });
         });
       }
-      seen.current = { phase: now, dice: context.dice, slots };
+      seen.current = { phase: now, dice: context.dice, slots, entries };
     }
 
     // --- read the throw once everything has come to rest ---
     const thrown = activeThrow.current;
-    if (!thrown || thrown.sent || now !== "rolling") return;
+    if (now !== "rolling" || (thrown?.sent ?? false)) return;
+
+    // Lock the dice in place, then report them, so what was read is what stays on the
+    // table: nothing can knock a die after its value has been reported. The dice read are
+    // the machine's free dice right now, so the event always has the length it expects.
+    const resolve = (forced: boolean) => {
+      const indices = freeDiceIndices(context);
+      const values = new Map<number, DieValue>();
+      for (const i of indices) {
+        die(i).halt();
+        die(i).freeze(true);
+        values.set(i, die(i).read().value);
+      }
+      const result = rolledValues(indices, values);
+      if (thrown) thrown.sent = true;
+      if (!result) return;
+      stats.rolledSent += 1;
+      if (forced) stats.forced += 1;
+      actor.send({ type: "rolled", values: result });
+    };
+
+    // Rolling with no throw on record should be impossible; recover rather than hang.
+    if (!thrown) return resolve(true);
+
+    thrown.age += Math.min(rawDelta, 0.25);
+    if (thrown.age >= HARD_TIMEOUT_SECONDS) return resolve(true);
+
+    if (import.meta.env.DEV && stats.holdSettle) return;
+
     const readings = thrown.indices.map((i) => die(i).read());
     if (readings.some((r) => r.gliding)) return;
 
@@ -163,20 +239,12 @@ export function DiceSet() {
     if (cocked.length > 0 && !timedOut && thrown.nudges < MAX_NUDGES) {
       cocked.forEach((i) => die(i).nudge());
       thrown.nudges += 1;
+      stats.nudges += 1;
       thrown.stillFor = 0;
       return;
     }
 
-    // Lock the dice in place first, so what was read is what stays on the table: nothing
-    // can knock a die after its value has been reported.
-    const values = new Map<number, DieValue>();
-    for (const i of thrown.indices) {
-      die(i).freeze(true);
-      values.set(i, die(i).read().value);
-    }
-    const result = rolledValues(thrown.indices, values);
-    thrown.sent = true;
-    if (result) actor.send({ type: "rolled", values: result });
+    resolve(false);
   });
 
   return (

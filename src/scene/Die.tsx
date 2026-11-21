@@ -103,6 +103,8 @@ export interface DieHandle {
   ready(): boolean;
   /** Carry the die to a pose. While carried it passes through everything. */
   glideTo(position: Vec3, options: GlideOptions): void;
+  /** Abandon any carried move on the spot (last-resort recovery; the die stays where it is). */
+  halt(): void;
   /** Stop the die where it is and make it immovable, optionally levelling a tilted die. */
   freeze(level: boolean): void;
   /** Kick a stuck (cocked / stacked) die back towards the middle of the play area. */
@@ -195,6 +197,12 @@ export function Die({ index, ref, initialPosition, interactive = false, selected
           elapsed: 0,
           launch: options.launch,
         };
+      },
+      halt() {
+        if (!glide.current) return;
+        glide.current = null;
+        makeKinematic();
+        setSensor(false);
       },
       freeze(level) {
         const rigidBody = body.current;
