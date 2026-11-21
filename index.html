@@ -2,11 +2,48 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Farkle</title>
+    <meta
+      name="description"
+      content="Farkle, the classic push-your-luck dice game, with real 3D dice. Pass-and-play for 1 to 8 players, right in your browser."
+    />
+    <meta name="theme-color" content="#0b0907" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Farkle" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta property="og:title" content="Farkle" />
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:description"
+      content="The classic push-your-luck dice game, with real 3D dice. Pass-and-play for 1 to 8 players."
+    />
+    <!-- Ivory die showing five, on a felt-green tile. Inline so it costs no request. -->
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2315422b'/%3E%3Crect x='11' y='11' width='42' height='42' rx='10' fill='%23f4ecd8' stroke='%23d9b25f' stroke-width='2'/%3E%3Cg fill='%231b1209'%3E%3Ccircle cx='22' cy='22' r='4'/%3E%3Ccircle cx='42' cy='22' r='4'/%3E%3Ccircle cx='32' cy='32' r='4'/%3E%3Ccircle cx='22' cy='42' r='4'/%3E%3Ccircle cx='42' cy='42' r='4'/%3E%3C/g%3E%3C/svg%3E"
+    />
+    <!-- Painted before the stylesheet arrives, so there is never a white flash. -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #0b0907;
+        color: #f4ecd8;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <p style="padding: 2rem; font-family: system-ui, sans-serif; text-align: center">
+        Farkle needs JavaScript to roll the dice.
+      </p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

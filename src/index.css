@@ -1,29 +1,321 @@
+/*
+ * Global theme, reset and app-shell styles. Component styles live next to their components.
+ *
+ * THEME VARIABLES (defined on :root, usable anywhere, including the HUD):
+ *
+ *   Wood (page background, dark chrome)
+ *     --wood-900  --wood-800  --wood-700  --wood-500
+ *   Felt (panels, cards)
+ *     --felt-900  --felt-800  --felt-700  --felt-500
+ *   Ivory (text, light surfaces)
+ *     --ivory  --ivory-dim (secondary text)  --ivory-faint (hints, disabled)
+ *   Gold (accent: primary buttons, focus ring, highlights)
+ *     --gold  --gold-bright  --gold-deep
+ *   Other colours
+ *     --ink (text on gold/ivory)  --danger (errors, farkle)  --success
+ *     --line (hairline borders on dark)  --scrim (translucent backdrop behind overlays)
+ *   Ready-made surfaces
+ *     --surface-wood (page background)  --surface-felt (panel background)
+ *     --surface-gold (primary button background)
+ *   Type
+ *     --font-ui (system sans)  --font-display (system serif, titles and big numbers)
+ *     Use `font-variant-numeric: tabular-nums` for scores.
+ *   Shape and depth
+ *     --radius-sm  --radius-md  --radius-lg  --radius-pill
+ *     --shadow-sm  --shadow-md  --shadow-lg  --focus-ring (box-shadow value)
+ *   Motion
+ *     --ease-out  --ease-spring  --dur-fast (120ms)  --dur-med (240ms)  --dur-slow (480ms)
+ *   Layout
+ *     --safe-top  --safe-right  --safe-bottom  --safe-left (notch insets, 0 when none)
+ *     --tap (minimum touch target, 44px)
+ *     --z-scene (0)  --z-hud (10)  --z-overlay (20)  --z-loading (30)  --z-top (40)
+ *
+ * Utility classes: `.visually-hidden` (screen-reader only text).
+ * Animations honour `prefers-reduced-motion`; component CSS should do the same.
+ */
+
+:root {
+  --wood-900: #0b0907;
+  --wood-800: #171009;
+  --wood-700: #2a1b10;
+  --wood-500: #4d301c;
+
+  --felt-900: #0a2116;
+  --felt-800: #0f2f1f;
+  --felt-700: #15422b;
+  --felt-500: #1f5f3d;
+
+  --ivory: #f4ecd8;
+  --ivory-dim: #cdc3aa;
+  --ivory-faint: #94917c;
+
+  --gold: #d9b25f;
+  --gold-bright: #f2d48c;
+  --gold-deep: #a47a2c;
+
+  --ink: #1b1209;
+  --danger: #f08a73;
+  --success: #8fd19e;
+  --line: rgb(244 236 216 / 0.16);
+  --scrim: rgb(8 6 4 / 0.72);
+
+  --surface-wood:
+    radial-gradient(120% 90% at 50% 0%, rgb(120 78 42 / 0.35), transparent 60%),
+    repeating-linear-gradient(92deg, rgb(255 220 170 / 0.025) 0 2px, transparent 2px 7px),
+    linear-gradient(180deg, var(--wood-700), var(--wood-900));
+  --surface-felt:
+    radial-gradient(140% 100% at 50% 0%, rgb(255 255 255 / 0.07), transparent 55%),
+    linear-gradient(180deg, var(--felt-700), var(--felt-800));
+  --surface-gold: linear-gradient(180deg, var(--gold-bright), var(--gold) 55%, var(--gold-deep));
+
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 6px 18px rgb(0 0 0 / 0.45);
+  --shadow-lg: 0 24px 60px rgb(0 0 0 / 0.6);
+  --focus-ring: 0 0 0 2px var(--wood-900), 0 0 0 4px var(--gold-bright);
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 120ms;
+  --dur-med: 240ms;
+  --dur-slow: 480ms;
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --tap: 44px;
+
+  --z-scene: 0;
+  --z-hud: 10;
+  --z-overlay: 20;
+  --z-loading: 30;
+  --z-top: 40;
+
+  color-scheme: dark;
+}
+
+/* ---- Reset ------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html,
 body,
 #root {
   margin: 0;
   height: 100%;
-  background: #0f2a1d;
-  color: #f4f1e8;
-  font-family: system-ui, sans-serif;
 }
 
-.hud {
-  position: absolute;
-  inset: auto 0 24px 0;
-  display: flex;
-  justify-content: center;
-  pointer-events: none;
+html {
+  background: var(--wood-900);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
-.hud button {
-  pointer-events: auto;
+body {
+  background: var(--wood-900);
+  color: var(--ivory);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+#root {
+  position: relative;
+  isolation: isolate;
+}
+
+h1,
+h2,
+h3,
+p,
+ul,
+ol,
+fieldset,
+legend {
+  margin: 0;
+  padding: 0;
+}
+
+ul,
+ol {
+  list-style: none;
+}
+
+fieldset {
+  border: 0;
+  min-width: 0;
+}
+
+button,
+input,
+select,
+textarea {
   font: inherit;
-  font-size: 1.1rem;
-  padding: 0.6em 1.4em;
-  border: none;
-  border-radius: 999px;
-  background: #f4f1e8;
-  color: #0f2a1d;
+  color: inherit;
+}
+
+button {
   cursor: pointer;
+  touch-action: manipulation;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--gold);
+  color: var(--ink);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- App shell --------------------------------------------------------- */
+
+/* The game view: canvas fills it, the HUD overlays it. */
+.app-game {
+  position: absolute;
+  inset: 0;
+  background: var(--wood-900);
+}
+
+/* Shown while the 3D chunk (three + rapier) downloads and compiles. */
+.app-loading {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-loading);
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 22px;
+  padding: 24px;
+  background: var(--surface-wood);
+  text-align: center;
+}
+
+.app-loading__die {
+  width: 64px;
+  height: 64px;
+  filter: drop-shadow(0 10px 14px rgb(0 0 0 / 0.55));
+  animation: app-tumble 1.6s var(--ease-out) infinite;
+}
+
+.app-loading__title {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  letter-spacing: 0.02em;
+  color: var(--gold-bright);
+}
+
+.app-loading__hint {
+  color: var(--ivory-dim);
+  font-size: 0.95rem;
+}
+
+.app-loading__bar {
+  width: min(220px, 60vw);
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: rgb(244 236 216 / 0.12);
+  overflow: hidden;
+}
+
+.app-loading__bar::after {
+  content: "";
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--surface-gold);
+  animation: app-slide 1.3s ease-in-out infinite;
+}
+
+/* Fades out over the freshly mounted scene, so the table eases in instead of popping. */
+.app-curtain {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-loading);
+  background: var(--wood-900);
+  pointer-events: none;
+  animation: app-fade-out var(--dur-slow) ease-out 120ms both;
+}
+
+@keyframes app-tumble {
+  0% {
+    transform: translateY(0) rotate(0deg);
+  }
+  35% {
+    transform: translateY(-16px) rotate(140deg);
+  }
+  70%,
+  100% {
+    transform: translateY(0) rotate(360deg);
+  }
+}
+
+@keyframes app-slide {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
+}
+
+@keyframes app-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-loading__die,
+  .app-loading__bar::after {
+    animation: none;
+  }
+
+  .app-loading__bar::after {
+    width: 100%;
+    opacity: 0.6;
+  }
+
+  .app-curtain {
+    animation-duration: 1ms;
+    animation-delay: 0ms;
+  }
 }
