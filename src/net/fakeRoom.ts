@@ -17,6 +17,7 @@ import {
   parsePlayerName,
   presenceOf,
   seat as seatDevice,
+  seatAfterLeave,
   summaryOf,
   viewOf,
   type Room,
@@ -152,6 +153,19 @@ export class FakeRoomServer {
         break;
       case "seen":
         this.room = outcome.room;
+        break;
+      case "left":
+        this.room = outcome.room;
+        // The leaver's sockets are closed without a new room; later seats move up one.
+        for (const s of this.openSockets) {
+          const after = seatAfterLeave(s.seat!, outcome.seat);
+          if (after === null) {
+            s.seat = null;
+            s.readyState = CLOSED;
+            this.queue.push(() => s.onclose?.({ code: 1000 }));
+          } else s.seat = after;
+        }
+        for (const s of this.openSockets) this.sendRoom(s);
         break;
     }
   }

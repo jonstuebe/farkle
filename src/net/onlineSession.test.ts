@@ -283,12 +283,18 @@ describe("lobby", () => {
 describe("leaving the lobby", () => {
   test("a guest's leave() sends `leave` and closes for good", () => {
     const t = setup();
-    t.connect(HOST, "Ada", "host");
+    const ada = t.connect(HOST, "Ada", "host");
     const bo = t.connect(BO, "Bo");
     const socket = t.server.socketOf(BO)!;
+    const host = t.server.socketOf(HOST)!;
     bo.leave();
+    t.settle();
+    expect(t.server.room!.seats.map((seat) => seat.name)).toEqual(["Ada"]);
+    expect(t.server.summary(BO)).toEqual({ status: "notSeated" });
+    expect(host.readyState).toBe(1);
+    expect(ada.getRoom().room?.seats).toEqual([{ name: "Ada", connected: true }]);
     expect(socket.sent.at(-1)).toEqual({ type: "leave" });
-    expect(socket.closedByClient).toBe(true);
+    expect(socket.readyState).toBe(3);
     expect(bo.getRoom()).toMatchObject({ status: "closed", error: null });
     const sockets = t.server.sockets.length;
     t.settle(60_000);
@@ -317,20 +323,21 @@ describe("leaving the lobby", () => {
     expect(cy.getRoom().seat).toBe(2);
     expect(cy.getState().mySeats).toEqual([2]);
 
-    // Bo leaves: the server sends everyone the new seating, with Cy now in seat 1.
-    const seats = [
-      { name: "Ada", connected: true },
-      { name: "Cy", connected: true },
-    ];
-    const room = { phase: "lobby" as const, code: CODE, seats, rules: host.getState().input.rules! as never };
-    t.server.push(t.server.socketOf(CY)!, { type: "room", seat: 1, room });
-    t.server.push(t.server.socketOf(HOST)!, { type: "room", seat: 0, room });
+    const bo = t.server.socketOf(BO)!;
+    const boSession = t.connect("device-bo2-0000000000000", "Bea");
+    expect(boSession.getRoom().seat).toBe(3);
+    // Bo (seat 1) leaves through a real session.
+    bo.send(JSON.stringify({ type: "leave" }));
+    t.settle();
+    expect(t.server.room!.seats.map((seat) => seat.name)).toEqual(["Ada", "Cy", "Bea"]);
+    expect(boSession.getRoom()).toMatchObject({ status: "open", seat: 2 });
+    boSession.leave();
     t.settle();
     expect(cy.getRoom()).toMatchObject({ status: "open", seat: 1 });
     expect(cy.getState()).toMatchObject({ mySeats: [1], presence: [true, true], input: { players: ["Ada", "Cy"] } });
     expect(host.getRoom().seat).toBe(0);
     const mySeats = host.getState().mySeats;
-    t.server.push(t.server.socketOf(HOST)!, { type: "room", seat: 0, room });
+    host.configure({ targetScore: 5000 });
     t.settle();
     expect(host.getState().mySeats).toBe(mySeats); // unchanged seat keeps its identity
   });
