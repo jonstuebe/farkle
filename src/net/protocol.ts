@@ -110,6 +110,12 @@ export type ClientMessage =
   /** Host only, lobby only, needs MIN_SEATS seated. Deals the first game. */
   | { type: "start" }
   /**
+   * Guest only, lobby only: give up this device's seat (later seats move up one; everyone gets
+   * a fresh `room`). The server then closes the socket. The host cancels with DELETE invite
+   * instead. Once the game has started, seats are permanent and `leave` is ignored.
+   */
+  | { type: "leave" }
+  /**
    * A game move. `seq` is the log length the client saw when the player acted; a stale `seq`
    * (double tap, old screen) is rejected and the client gets the current room back.
    */
