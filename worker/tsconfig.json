@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022"],
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": []
+  },
+  // The Worker shares the game rules and the room logic (src/net/room.ts and what it imports)
+  // with the browser, so those are type-checked here too, against the Workers runtime types
+  // instead of the DOM.
+  "include": ["./**/*.ts", "../.cloudflare/types/index.d.ts", "../cloudflare.config.ts", "../src/net/room.ts"],
+  "exclude": ["../src/**/*.test.ts", "./**/*.test.ts"]
+}
