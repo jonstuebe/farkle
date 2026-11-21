@@ -20,6 +20,7 @@ import {
   parseClientMessage,
   parsePlayerName,
   presenceOf,
+  seatAfterLeave,
   seat,
   seatOfDevice,
   snapshotOf,
@@ -220,6 +221,58 @@ describe("applyMessage: lobby", () => {
   });
 });
 
+describe("applyMessage: leave", () => {
+  it("takes a guest's seat away and moves later seats up", () => {
+    const room = lobby(4, ["Ada", "Bo", "Cy", "Dee"]);
+    const outcome = applyMessage(room, 1, { type: "leave" });
+    expect(outcome).toMatchObject({ kind: "left", seat: 1, room: { phase: "lobby" } });
+    if (outcome.kind !== "left") return;
+    expect(outcome.room.seats.map((s) => s.name)).toEqual(["Ada", "Cy", "Dee"]);
+    expect(seatOfDevice(outcome.room, device(1))).toBeNull();
+    expect(seatOfDevice(outcome.room, device(3))).toBe(2);
+    expect(outcome.room.rules).toBe(room.phase === "lobby" && room.rules);
+    // The original room is untouched.
+    expect(room.seats).toHaveLength(4);
+  });
+
+  it("lets the last guest leave, and the device that left join again at the end", () => {
+    const outcome = applyMessage(lobby(3, ["Ada", "Bo", "Cy"]), 1, { type: "leave" });
+    if (outcome.kind !== "left") throw new Error(outcome.kind);
+    const back = seat(outcome.room, device(1), "join", "Bo");
+    expect(back.ok && back.seat).toBe(2);
+    expect(back.ok && back.room.seats.map((s) => s.name)).toEqual(["Ada", "Cy", "Bo"]);
+  });
+
+  it("frees a seat in a full lobby", () => {
+    const outcome = applyMessage(lobby(MAX_SEATS), 7, { type: "leave" });
+    if (outcome.kind !== "left") throw new Error(outcome.kind);
+    expect(seat(outcome.room, device(20), "join", "New")).toMatchObject({ ok: true, seat: 7 });
+  });
+
+  it("starts a game with the seats that stayed", () => {
+    const outcome = applyMessage(lobby(3, ["Ada", "Bo", "Cy"]), 1, { type: "leave" });
+    if (outcome.kind !== "left") throw new Error(outcome.kind);
+    const game = start(outcome.room, 0) as PlayingRoom;
+    expect(game.input.players).toEqual(["Ada", "Cy"]);
+    expect(game.seen).toEqual([0, 0]);
+    // Cy used to be seat 2 and now plays as seat 1.
+    const next = bankThousand(game, 0);
+    expect(applyMessage(next, 1, { type: "intent", seq: next.log.length, intent: { type: "roll" } }).kind).toBe("appended");
+  });
+
+  it("ignores the host, and anyone once the game has started", () => {
+    expect(applyMessage(lobby(3), 0, { type: "leave" })).toEqual({ kind: "ignored" });
+    expect(applyMessage(lobby(1), 0, { type: "leave" })).toEqual({ kind: "ignored" });
+    expect(applyMessage(playing(3), 1, { type: "leave" })).toEqual({ kind: "ignored" });
+    expect(applyMessage(finished(), 1, { type: "leave" })).toEqual({ kind: "ignored" });
+  });
+
+  it("renumbers sockets: the leaver loses its seat, later seats move up", () => {
+    expect([0, 1, 2, 3].map((s) => seatAfterLeave(s, 1))).toEqual([0, null, 1, 2]);
+    expect([0, 1, 2].map((s) => seatAfterLeave(s, 2))).toEqual([0, 1, null]);
+  });
+});
+
 describe("applyMessage: intent", () => {
   it("appends a throw as two entries with the server's dice", () => {
     const room = playing(2);
@@ -335,6 +388,7 @@ describe("parseClientMessage", () => {
       { type: "configure", rules: { targetScore: 5000, entryThreshold: 500 } },
       { type: "configure", rules: {} },
       { type: "start" },
+      { type: "leave" },
       { type: "intent", seq: 0, intent: { type: "roll" } },
       { type: "intent", seq: 4, intent: { type: "keepAndRoll" } },
       { type: "intent", seq: 4, intent: { type: "toggleDie", index: 5 } },

@@ -32,7 +32,7 @@ A game is its starting input plus an append-only log of moves (`src/game/log.ts`
 
 Rooms delete themselves when nobody touches them: a lobby after 7 days, a game in progress after 30, a finished game after 7.
 
-`bun run smoke` plays through all of this over real WebSockets: a host and two guests, rules, turns, moves that must be refused, a disconnect and reconnect, a game to the end, a rematch, cancelling a lobby and a full lobby. It needs `bun dev` running, and takes the server's address if it isn't the default:
+`bun run smoke` plays through all of this over real WebSockets: a host and two guests, rules, turns, moves that must be refused, a disconnect and reconnect, a game to the end, a rematch, cancelling a lobby, a guest leaving a lobby and a full lobby. It needs `bun dev` running, and takes the server's address if it isn't the default:
 
 ```bash
 bun run smoke http://localhost:5174

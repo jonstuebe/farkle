@@ -18,6 +18,7 @@ import {
   parseClientMessage,
   parsePlayerName,
   presenceOf,
+  seatAfterLeave,
   seat,
   summaryOf,
   viewOf,
@@ -233,6 +234,27 @@ export class Room extends DurableObject<Env> {
         return;
       case "seen":
         await this.save(outcome.room);
+        return;
+      case "left":
+        await this.save(outcome.room);
+        for (const other of this.ctx.getWebSockets()) {
+          const before = seatOf(other);
+          if (before === null) continue;
+          const after = seatAfterLeave(before, outcome.seat);
+          if (after === null) {
+            // Every socket of the device that left (it may have the lobby open twice). Without
+            // a seat it gets no more messages.
+            other.serializeAttachment({});
+            try {
+              other.close(1000, "Left");
+            } catch {
+              // Already closed.
+            }
+          } else if (after !== before) {
+            other.serializeAttachment({ seat: after } satisfies Attachment);
+          }
+        }
+        this.broadcastRoom(outcome.room);
         return;
     }
   }

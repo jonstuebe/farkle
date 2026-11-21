@@ -176,13 +176,16 @@ export const isGameOver = (room: PlayingRoom): boolean => snapshotOf(room).statu
  * - `room`: save, then send everyone a `room` (lobby change, start, rematch).
  * - `appended`: save, then send everyone `appended` with `entries`.
  * - `seen`: save; nobody needs telling.
+ * - `left`: seat `seat` is gone and the seats after it moved up one. Save, close that seat's
+ *   sockets, renumber the others, then send everyone who's left a `room`.
  */
 export type Outcome =
   | { kind: "ignored" }
   | { kind: "rejected" }
   | { kind: "room"; room: Room }
   | { kind: "appended"; room: PlayingRoom; entries: LogEntry[] }
-  | { kind: "seen"; room: PlayingRoom };
+  | { kind: "seen"; room: PlayingRoom }
+  | { kind: "left"; room: LobbyRoom; seat: number };
 
 const REJECTED: Outcome = { kind: "rejected" };
 
@@ -208,6 +211,11 @@ export function applyMessage(
 
     case "start":
       return changed(room, start(room, bySeat));
+
+    case "leave":
+      // The host cancels the room instead, and once the game has started seats are permanent.
+      if (room.phase !== "lobby" || bySeat === HOST_SEAT) return { kind: "ignored" };
+      return { kind: "left", room: { ...room, seats: room.seats.filter((_, i) => i !== bySeat) }, seat: bySeat };
 
     case "intent": {
       if (room.phase !== "playing" || message.seq !== room.log.length) return REJECTED;
@@ -298,6 +306,8 @@ export function parseClientMessage(data: unknown): ClientMessage | null {
     }
     case "start":
       return { type: "start" };
+    case "leave":
+      return { type: "leave" };
     case "intent": {
       const intent = parseIntent(value.intent);
       return intent && isCount(value.seq) ? { type: "intent", seq: value.seq, intent } : null;
@@ -323,6 +333,10 @@ export function presenceOf(room: Room, connectedSeats: Iterable<number>): boolea
   const open = new Set(connectedSeats);
   return room.seats.map((_, i) => open.has(i));
 }
+
+/** Where a socket's seat is after `left` gave up theirs: null for the seat that left. */
+export const seatAfterLeave = (seat: number, left: number): number | null =>
+  seat === left ? null : seat > left ? seat - 1 : seat;
 
 export function viewOf(room: Room, code: string, connected: readonly boolean[]): RoomView {
   const seats = room.seats.map((s, i) => ({ name: s.name, connected: connected[i] ?? false }));

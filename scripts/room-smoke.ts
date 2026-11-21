@@ -7,7 +7,7 @@
  *
  * Covers: host opens a room, guests join, rules, start, turns with seq, a stale seq, a move out
  * of turn, malformed messages, disconnect + reconnect, seen marks, summaries, a whole game to
- * the end, rematch, cancelling a lobby, a full lobby, and the HTTP error cases.
+ * the end, rematch, cancelling a lobby, leaving a lobby, a full lobby, and the HTTP error cases.
  * Every room uses a fresh random code, so it is safe to run again and again.
  */
 import { replayLog, type GameSnapshot, type Intent } from "../src/game/log.ts";
@@ -419,6 +419,56 @@ async function main() {
   const rejoin = await connect("rejoin", lobbyCode, lobbyGuestId, "Bo", "join");
   await rejoin.until(() => rejoin.closed !== null, "close");
   check(same(rejoin.inbox, [{ type: "refused", reason: "missing" }]), "the old invite link no longer works");
+
+  console.log("\nLeaving a lobby");
+  const leaveCode = newRoomCode();
+  const leaveHost = await connect("host", leaveCode, newDevice(), "Ada", "host");
+  const leaverId = newDevice();
+  const leaver = await connect("leaver", leaveCode, leaverId, "Bo", "join");
+  const stayer = await connect("stayer", leaveCode, newDevice(), "Cy", "join");
+  const lastIn = await connect("last in", leaveCode, newDevice(), "Dee", "join");
+  const leaverTab = await connect("leaver's other tab", leaveCode, leaverId, null, "join");
+  check(same([leaver.seat, stayer.seat, lastIn.seat, leaverTab.seat], [1, 2, 3, 1]), "three guests are seated 1, 2, 3");
+  await leaveHost.until(() => leaveHost.room?.seats.length === 4, "four seats");
+
+  leaveHost.send({ type: "leave" });
+  await leaveHost.quiet("the host's leave");
+  const hostStill = await summary(leaveCode, leaveHost.device);
+  check(hostStill.status === "lobby" && hostStill.seats.length === 4 && leaveHost.closed === null, "the host's leave is ignored");
+
+  leaver.send({ type: "leave" });
+  const stayers = [leaveHost, stayer, lastIn];
+  await Promise.all(stayers.map((c) => c.until(() => c.room?.seats.length === 3, "three seats")));
+  check(same(leaveHost.room?.seats.map((s) => s.name), ["Ada", "Cy", "Dee"]), "a guest leaves and their seat is gone");
+  check(same(stayers.map((c) => c.seat), [0, 1, 2]), "the guests after them move up a seat");
+  check(same(leaveHost.room?.seats.map((s) => s.connected), [true, true, true]), "everyone still there shows as connected");
+  await leaver.until(() => leaver.closed !== null, "close");
+  check(leaver.closed?.code === 1000, "the leaver's socket is closed (1000)");
+  check(leaver.room?.seats.length === 4, "...and isn't sent the new room");
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  check(leaverTab.room?.seats.length === 4, "their other tab stops hearing about the room too");
+  check((await summary(leaveCode, leaverId)).status === "notSeated", "the leaver's summary is notSeated");
+  check(same(await summary(leaveCode, lastIn.device), { status: "lobby", seats: ["Ada", "Cy", "Dee"], isHost: false }), "the others' summaries show three seats");
+
+  leaveHost.send({ type: "start" });
+  await Promise.all(stayers.map((c) => c.until(() => c.room?.phase === "playing", "the game")));
+  check(same(stayer.playing.input.players, ["Ada", "Cy", "Dee"]), "the game starts with the three who stayed");
+  await takeTurn(stayers);
+  await takeTurn(stayers);
+  await takeTurn(stayers);
+  const seatsPlayed = [...new Set(leaveHost.playing.log.map((entry) => entry.seat))];
+  check(same(seatsPlayed, [0, 1, 2]) && leaveHost.snapshot().context.current === 0, "all three take a turn in their new seats");
+  check(same(lastIn.playing.log, leaveHost.playing.log), "...and share one log");
+
+  lastIn.send({ type: "leave" });
+  await lastIn.quiet("a leave after the start");
+  await leaveHost.quiet("someone else's leave after the start");
+  const stillIn = await summary(leaveCode, lastIn.device);
+  check(stillIn.status === "theirTurn" && stillIn.seats.length === 3 && lastIn.closed === null, "a leave after the start is ignored");
+  const tooLate = await connect("leaver again", leaveCode, leaverId, "Bo", "join");
+  await tooLate.until(() => tooLate.closed !== null, "close");
+  check(same(tooLate.inbox, [{ type: "refused", reason: "started" }]), "the leaver can't come back once the game has started");
+  await Promise.all([...stayers, leaverTab].map((c) => c.close()));
 
   console.log("\nA full lobby");
   const fullCode = newRoomCode();
