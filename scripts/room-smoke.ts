@@ -247,10 +247,12 @@ async function main() {
   guestA.send({ type: "start" });
   check((await guestA.next("room", from)).room.phase === "lobby", "a guest can't start the game");
 
-  host.send({ type: "configure", rules: { targetScore: 1000, entryThreshold: 500 } });
-  await guestB.until(() => guestB.room?.phase === "lobby" && guestB.room.rules.targetScore === 1000, "new rules");
+  // A target nobody reaches in their first turn or two, so the game is still on for the
+  // disconnect and reconnect checks below.
+  host.send({ type: "configure", rules: { targetScore: 3000, entryThreshold: 500 } });
+  await guestB.until(() => guestB.room?.phase === "lobby" && guestB.room.rules.targetScore === 3000, "new rules");
   check(guestB.room?.phase === "lobby" && guestB.room.rules.entryThreshold === 500, "the host's rules reach the guests");
-  await host.until(() => host.room?.phase === "lobby" && host.room.rules.targetScore === 1000, "new rules");
+  await host.until(() => host.room?.phase === "lobby" && host.room.rules.targetScore === 3000, "new rules");
 
   host.send("not json");
   host.send(JSON.stringify({ type: "shuffle" }));
@@ -264,7 +266,7 @@ async function main() {
   const started = guestA.playing;
   check(started.gameNumber === 1 && started.log.length === 0 && same(started.seen, [0, 0, 0]), "game 1 starts with an empty log, nothing seen");
   check(same(started.input.players, ["Ada Lovelace", "Bo", "Player 3"]), "players are the seat names");
-  check(started.input.rules?.targetScore === 1000 && started.input.rules.entryThreshold === 500, "the game uses the lobby's rules");
+  check(started.input.rules?.targetScore === 3000 && started.input.rules.entryThreshold === 500, "the game uses the lobby's rules");
 
   const late = await connect("late", code, newDevice(), "Late", "join");
   await late.until(() => late.closed !== null, "close");
@@ -318,6 +320,14 @@ async function main() {
   console.log("\nSeen, disconnect, reconnect");
   const lengthAtLeave = guestA.playing.log.length;
   guestA.send({ type: "seen", seq: lengthAtLeave });
+  // `seen` gets no reply, so ask until the Room has it before hanging up.
+  for (let tries = 0; ; tries++) {
+    const mine = await summary(code, guestAId);
+    if ("unseen" in mine && mine.unseen === 0) break;
+    if (tries > 50) throw new Error("FAILED: the Room never recorded guest A's seen mark");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  check(true, "a seen mark is recorded");
   from = host.inbox.length;
   await guestA.close();
   const left = await host.next("presence", from);
@@ -358,7 +368,7 @@ async function main() {
   const over = await summary(code, guestBId);
   check(over.status === "over" && same(over.scores, scores) && over.mySeat === 2, `the game ends after ${turns} more turns: ${scores.join(" / ")}`);
   check(over.status === "over" && same(over.winners, final.output?.winners), "the summary names the winners");
-  check(Math.max(...scores) >= 1000, "someone reached the target");
+  check(Math.max(...scores) >= 3000, "someone reached the target");
 
   from = back.inbox.length;
   back.send({ type: "rematch", gameNumber: 7 });
