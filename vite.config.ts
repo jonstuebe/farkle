@@ -14,6 +14,12 @@ export default defineConfig({
           groups: [
             { name: "rapier", test: /node_modules[\\/]@dimforge/ },
             { name: "three", test: /node_modules[\\/]three/ },
+            // React/xstate + Vite's preload helper stay out of `vendor`, so the setup screen
+            // can paint without preloading three/rapier (GameCanvas is lazy-loaded).
+            {
+              name: "react",
+              test: /vite[\\/]preload-helper|node_modules[\\/](react|react-dom|scheduler|xstate|@xstate|use-sync-external-store|use-isomorphic-layout-effect)[\\/]/,
+            },
             { name: "vendor", test: /node_modules/ },
           ],
         },
