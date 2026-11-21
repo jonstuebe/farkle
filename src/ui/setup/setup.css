@@ -509,3 +509,48 @@
     transition: none;
   }
 }
+
+/* ---- Shared shell bits (Brand.tsx): back link and the smaller header on inner screens ---- */
+
+.setup__back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--tap);
+  margin: -12px 0 -12px -6px;
+  padding: 0 12px 0 6px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--ivory-dim);
+  font-weight: 600;
+}
+
+.setup__back svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.setup__back:hover {
+  color: var(--ivory);
+  background: rgb(244 236 216 / 0.08);
+}
+
+.setup__back:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.setup__header--compact .setup__logo {
+  width: 72px;
+}
+
+.setup__header--compact .setup__title {
+  font-size: clamp(2.2rem, 10vw, 2.75rem);
+}

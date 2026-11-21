@@ -9,6 +9,7 @@ import {
   saveSetupPrefs,
   type SavedGameSummary,
 } from "../../game/persistence";
+import { Screen } from "./Brand";
 import "./setup.css";
 
 export interface SetupScreenProps {
@@ -16,6 +17,8 @@ export interface SetupScreenProps {
   /** An in-progress game found in storage; shows the "Resume game" card when set. */
   savedGame?: SavedGameSummary | null;
   onResume?: () => void;
+  /** Shows a "Home" link above the title when set. */
+  onBack?: () => void;
 }
 
 const TARGET_PRESETS = [5000, 10_000] as const;
@@ -58,7 +61,7 @@ export function validateTarget(raw: string): string | null {
 }
 
 /** Pre-game screen: roster, target score, entry threshold, and resume of a saved game. */
-export function SetupScreen({ onStart, savedGame, onResume }: SetupScreenProps) {
+export function SetupScreen({ onStart, savedGame, onResume, onBack }: SetupScreenProps) {
   const prefs = useMemo(() => loadSetupPrefs(), []);
   const nextId = useRef(prefs.players.length);
   const [players, setPlayers] = useState<PlayerRow[]>(() => prefs.players.map((name, id) => ({ id, name })));
@@ -142,31 +145,7 @@ export function SetupScreen({ onStart, savedGame, onResume }: SetupScreenProps) 
   const leader = savedGame ? Math.max(...savedGame.players.map((p) => p.score)) : 0;
 
   return (
-    <main className="setup">
-      <div className="setup__inner">
-        <header className="setup__header">
-          <svg className="setup__logo" viewBox="0 0 120 64" aria-hidden="true">
-            <g transform="rotate(-12 34 34)">
-              <rect x="10" y="10" width="46" height="46" rx="11" fill="var(--ivory)" stroke="var(--gold)" strokeWidth="2" />
-              <g fill="var(--ink)">
-                <circle cx="33" cy="33" r="5" />
-              </g>
-            </g>
-            <g transform="rotate(10 86 32)">
-              <rect x="64" y="8" width="46" height="46" rx="11" fill="var(--ivory)" stroke="var(--gold)" strokeWidth="2" />
-              <g fill="var(--ink)">
-                <circle cx="76" cy="20" r="4.5" />
-                <circle cx="98" cy="20" r="4.5" />
-                <circle cx="87" cy="31" r="4.5" />
-                <circle cx="76" cy="42" r="4.5" />
-                <circle cx="98" cy="42" r="4.5" />
-              </g>
-            </g>
-          </svg>
-          <h1 className="setup__title">Farkle</h1>
-          <p className="setup__tagline">Push your luck. Bank it, or lose it all.</p>
-        </header>
-
+    <Screen onBack={onBack} compact={Boolean(onBack)}>
         {savedGame && onResume ? (
           <section className="setup__card setup__resume" aria-labelledby={`${uid}-resume`}>
             <div className="setup__resume-head">
@@ -343,7 +322,6 @@ export function SetupScreen({ onStart, savedGame, onResume }: SetupScreenProps) 
         <p className="visually-hidden" role="status" aria-live="polite">
           {announcement}
         </p>
-      </div>
-    </main>
+    </Screen>
   );
 }

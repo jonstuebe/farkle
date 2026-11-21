@@ -1,0 +1,426 @@
+/* Online screens: home, naming, join, lobby. Built on the setup-screen classes (../setup/setup.css). */
+
+.online__lead {
+  color: var(--ivory-dim);
+  font-size: 0.98rem;
+  margin-top: -8px;
+}
+
+.online__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.online__field .setup__legend {
+  margin-bottom: 2px;
+}
+
+.online__hint {
+  margin-top: -8px;
+  text-align: center;
+  color: var(--ivory-dim);
+  font-size: 0.9rem;
+}
+
+.online__link {
+  min-height: var(--tap);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--gold-bright);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.online__link:hover {
+  color: var(--ivory);
+}
+
+.online__link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* ---- Home menu ---- */
+
+.online__menu {
+  gap: 10px;
+}
+
+.online__choice {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  min-height: 64px;
+  padding: 12px 44px 12px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background:
+    no-repeat right 16px center / 12px 12px
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4 1l5 5-5 5' fill='none' stroke='%23cdc3aa' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"),
+    rgb(0 0 0 / 0.26);
+  color: var(--ivory);
+  text-align: left;
+  transition:
+    background-color var(--dur-fast),
+    border-color var(--dur-fast),
+    transform var(--dur-fast) var(--ease-out);
+}
+
+.online__choice:hover {
+  border-color: rgb(244 236 216 / 0.36);
+  background-color: rgb(0 0 0 / 0.36);
+}
+
+.online__choice:active {
+  transform: translateY(1px) scale(0.99);
+}
+
+.online__choice:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.online__choice--primary {
+  border-color: rgb(255 240 200 / 0.6);
+  background:
+    no-repeat right 16px center / 12px 12px
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4 1l5 5-5 5' fill='none' stroke='%231b1209' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"),
+    var(--surface-gold);
+  color: var(--ink);
+  box-shadow:
+    0 4px 0 #6f5019,
+    0 10px 20px rgb(0 0 0 / 0.4),
+    inset 0 1px 0 rgb(255 255 255 / 0.55);
+  margin-bottom: 6px;
+}
+
+.online__choice--primary:hover {
+  background-color: transparent;
+  border-color: rgb(255 240 200 / 0.9);
+  filter: brightness(1.05);
+}
+
+.online__choice-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.online__choice-hint {
+  font-size: 0.88rem;
+  color: var(--ivory-dim);
+  overflow-wrap: anywhere;
+}
+
+.online__choice--primary .online__choice-hint {
+  color: rgb(27 18 9 / 0.78);
+}
+
+.online__identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0 6px;
+  color: var(--ivory-dim);
+  font-size: 0.92rem;
+}
+
+.online__identity strong {
+  color: var(--ivory);
+}
+
+/* ---- Your online games ---- */
+
+.online__games {
+  gap: 12px;
+}
+
+.online__rooms {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-md);
+  background: rgb(0 0 0 / 0.26);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.online__room {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--tap);
+  align-items: center;
+  padding-right: 4px;
+}
+
+.online__room + .online__room {
+  border-top: 1px solid var(--line);
+}
+
+.online__room-open {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 56px;
+  padding: 10px 8px 10px 12px;
+  border: 0;
+  background: none;
+  color: var(--ivory);
+  text-align: left;
+}
+
+.online__room-open:hover {
+  background: rgb(244 236 216 / 0.06);
+}
+
+.online__room-open:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: -2px;
+}
+
+.online__room-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.online__room-code {
+  margin-left: auto;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  color: var(--ivory-faint);
+}
+
+.online__room-detail {
+  font-size: 0.88rem;
+  color: var(--ivory-dim);
+  overflow-wrap: anywhere;
+}
+
+.online__badge {
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+  background: rgb(244 236 216 / 0.12);
+  color: var(--ivory);
+}
+
+.online__badge--you {
+  background: var(--gold);
+  color: var(--ink);
+}
+
+.online__badge--lobby {
+  background: rgb(143 209 158 / 0.18);
+  color: var(--success);
+}
+
+.online__badge--muted,
+.online__badge--over {
+  color: var(--ivory-dim);
+}
+
+.online__news {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--gold-bright);
+}
+
+/* ---- Lobby ---- */
+
+.online__invite {
+  align-items: stretch;
+  gap: 12px;
+  text-align: center;
+}
+
+.online__code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: clamp(2.4rem, 13vw, 3.4rem);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.1em;
+  /* Balance the trailing letter-spacing so the code sits centred. */
+  padding: 10px 0 10px 0.1em;
+  border-radius: var(--radius-md);
+  background: rgb(0 0 0 / 0.3);
+  border: 1px dashed rgb(217 178 95 / 0.5);
+  color: var(--ivory);
+  user-select: all;
+  white-space: nowrap;
+}
+
+.online__code--small {
+  font-size: 1.6rem;
+  text-align: center;
+}
+
+.online__share-note {
+  min-height: 1.3em;
+  margin: -4px 0;
+  font-size: 0.88rem;
+  color: var(--success);
+}
+
+.online__share-note:empty {
+  display: none;
+}
+
+.online__link-box {
+  height: 40px;
+  font-size: 0.85rem;
+  text-align: center;
+  color: var(--ivory-dim);
+}
+
+.online__aloud {
+  font-size: 0.88rem;
+  color: var(--ivory-dim);
+  text-align: left;
+}
+
+.online__aloud strong {
+  color: var(--ivory);
+  font-weight: 600;
+}
+
+.online__aloud-code {
+  white-space: nowrap;
+  letter-spacing: 0.06em;
+}
+
+.online__legend {
+  margin-bottom: -8px;
+  font-family: var(--font-ui);
+}
+
+.online__seats {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-md);
+  background: rgb(0 0 0 / 0.26);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.online__seat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 12px;
+}
+
+.online__seat + .online__seat {
+  border-top: 1px solid var(--line);
+}
+
+.online__seat--empty {
+  color: var(--ivory-faint);
+  font-style: italic;
+}
+
+.online__seat-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.online__dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid var(--ivory-faint);
+  background: transparent;
+}
+
+.online__dot.is-on {
+  border-color: var(--success);
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgb(143 209 158 / 0.18);
+}
+
+.online__tag {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ivory-dim);
+}
+
+.online__tag--you {
+  border-color: var(--gold);
+  color: var(--gold-bright);
+}
+
+.online__rules {
+  color: var(--ivory-dim);
+  font-size: 0.95rem;
+}
+
+.online__rules strong {
+  color: var(--ivory);
+}
+
+.online__footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.online__confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--ivory);
+}
+
+.online__confirm > span {
+  flex-basis: 100%;
+}
+
+.online__btn--danger {
+  background: var(--danger);
+  color: var(--ink);
+}
+
+.online__notice {
+  text-align: center;
+  gap: 14px;
+}
+
+.online__notice .online__lead {
+  margin-top: 0;
+}
+
+.online__notice .app-loading__bar {
+  align-self: center;
+}
+
+.setup__btn:disabled {
+  filter: saturate(0.4) brightness(0.75);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .online__choice {
+    transition: none;
+  }
+}

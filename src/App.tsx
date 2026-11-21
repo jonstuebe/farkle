@@ -1,28 +1,45 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { GameInput } from "./game/machine";
 import { clearSavedGame, loadSavedGame, persistSession, summarizeSavedGame, type SavedGame } from "./game/persistence";
 import { AppActionsContext, GameProvider, type AppActions } from "./game/react";
 import { createLocalSession, type GameSession } from "./game/session";
 import { Presenter } from "./game/presenter";
+import { getDeviceId, getPlayerName, setPlayerName } from "./net/device";
+import { newRoomCode } from "./net/protocol";
+import { createRouter, type Route, type Router } from "./net/routes";
 import { Hud } from "./ui/hud/Hud";
 import { SetupScreen } from "./ui/setup/SetupScreen";
+import { HomeScreen } from "./ui/online/HomeScreen";
+import { JoinScreen } from "./ui/online/JoinScreen";
+import { NameScreen } from "./ui/online/NameScreen";
+import { RoomScreen, type OnlineGame } from "./ui/online/RoomScreen";
 import { MuteButton } from "./audio/MuteButton";
 
 // three + rapier are ~1 MB gzipped: keep them out of the first paint and load them on demand.
 const loadScene = () => import("./scene/GameCanvas");
 const GameCanvas = lazy(() => loadScene().then((m) => ({ default: m.GameCanvas })));
 
-type Screen =
-  | { kind: "setup" }
-  | { kind: "playing"; input: GameInput; session: GameSession; presenter: Presenter; gameId: number };
+/**
+ * Screens, by route (see ./net/routes.ts):
+ *   /          home, and under it (history state) local play and the join form
+ *   /r/CODE    an online room: naming (first time), lobby, then the game
+ */
+const router: Router = createRouter(window);
 
-let nextGameId = 1;
+const HOME: Route = { kind: "home" };
 
 export function App() {
-  const [screen, setScreen] = useState<Screen>({ kind: "setup" });
-  const [saved, setSaved] = useState<SavedGame | null>(() => loadSavedGame());
+  const route = useSyncExternalStore(router.subscribe, router.getRoute);
+  const deviceId = useMemo(() => getDeviceId(), []);
+  const [name, setName] = useState<string | null>(() => getPlayerName());
+  const [editingName, setEditingName] = useState(false);
+  // Read again whenever home is shown, so a local game played since then is offered.
+  const localGame = useMemo(() => {
+    const saved = route.kind === "home" ? loadSavedGame() : null;
+    return saved ? summarizeSavedGame(saved) : null;
+  }, [route]);
 
-  // Warm the 3D chunk once the setup screen has painted, so Start is (usually) instant.
+  // Warm the 3D chunk once the first screen has painted, so starting a game is (usually) instant.
   useEffect(() => {
     const warm = () => void loadScene().catch(() => {});
     if (typeof requestIdleCallback === "function") {
@@ -33,18 +50,119 @@ export function App() {
     return () => clearTimeout(id);
   }, []);
 
+  const goHome = useCallback(() => router.back(HOME), []);
+  const saveName = useCallback((next: string) => setName(setPlayerName(next) ?? next), []);
+
+  // Leaving a room for home must not leave the room behind the Back button as "forward only":
+  // from a game, "home" is a fresh navigation the player can come back from.
+  const leaveRoom = useCallback(() => router.push(HOME), []);
+
+  const onlineGame = useCallback(
+    (game: OnlineGame) => (
+      <OnlineGameView key={`${game.session.code}:${game.gameNumber}`} game={game} onHome={leaveRoom} />
+    ),
+    [leaveRoom],
+  );
+
+  let screen;
+  switch (route.kind) {
+    case "home":
+      screen = editingName ? (
+        <NameScreen
+          initial={name ?? ""}
+          submitLabel="Save name"
+          onBack={() => setEditingName(false)}
+          onDone={(next) => {
+            saveName(next);
+            setEditingName(false);
+          }}
+        />
+      ) : (
+        <HomeScreen
+          deviceId={deviceId}
+          name={name}
+          localGame={localGame}
+          onLocal={() => router.push({ kind: "local" })}
+          onHost={() => router.push({ kind: "room", code: newRoomCode(), host: true })}
+          onJoin={() => router.push({ kind: "join" })}
+          onOpenRoom={(code) => router.push({ kind: "room", code, host: false })}
+          onEditName={() => setEditingName(true)}
+        />
+      );
+      break;
+    case "local":
+      screen = <LocalPlay onHome={goHome} />;
+      break;
+    case "join":
+      // Replace, so Back from the room goes home rather than to a stale form.
+      screen = <JoinScreen onBack={goHome} onJoin={(code) => router.replace({ kind: "room", code, host: false })} />;
+      break;
+    case "room":
+      screen =
+        name === null ? (
+          <NameScreen key={route.code} onBack={goHome} onDone={saveName} submitLabel={route.host ? "Create game" : "Join game"} />
+        ) : (
+          <RoomScreen
+            key={route.code}
+            code={route.code}
+            host={route.host}
+            deviceId={deviceId}
+            name={name}
+            onHome={goHome}
+            onJoinAnother={() => router.replace({ kind: "join" })}
+            renderGame={onlineGame}
+          />
+        );
+      break;
+  }
+
+  return (
+    <>
+      {screen}
+      <MuteButton />
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Local pass-and-play: setup screen, then the game (saved in localStorage as it goes)
+// ---------------------------------------------------------------------------------------------
+
+type LocalScreen =
+  | { kind: "setup" }
+  | { kind: "playing"; input: GameInput; session: GameSession; presenter: Presenter; gameId: number };
+
+let nextGameId = 1;
+
+function LocalPlay({ onHome }: { onHome: () => void }) {
+  const [screen, setScreen] = useState<LocalScreen>({ kind: "setup" });
+  const [saved, setSaved] = useState<SavedGame | null>(() => loadSavedGame());
+
   // Session + presenter are created in event handlers (never during render, so StrictMode can't
   // double them) and the previous game's presenter is stopped when the screen changes.
-  const show = useCallback((next: Screen) => {
-    setScreen((current) => {
-      if (current.kind === "playing" && current !== next) current.presenter.stop();
-      return next;
-    });
+  const current = useRef(screen);
+  const show = useCallback((next: LocalScreen) => {
+    const previous = current.current;
+    if (previous.kind === "playing" && previous !== next) previous.presenter.stop();
+    current.current = next;
+    setScreen(next);
+  }, []);
+
+  // Leaving local play (Back, Home) stops whatever was running. Deferred a tick: StrictMode's
+  // rehearsal unmount is followed at once by a remount, which must keep the game going.
+  useEffect(() => {
+    let unmounted = false;
+    return () => {
+      unmounted = true;
+      queueMicrotask(() => {
+        if (unmounted && current.current.kind === "playing") current.current.presenter.stop();
+      });
+    };
   }, []);
 
   const open = useCallback(
-    (input: GameInput, saved?: SavedGame) => {
-      const session = createLocalSession({ input, log: saved?.log ?? [] });
+    (input: GameInput, from?: SavedGame) => {
+      const session = createLocalSession({ input, log: from?.log ?? [] });
       show({ kind: "playing", input, session, presenter: new Presenter(session), gameId: nextGameId++ });
     },
     [show],
@@ -80,43 +198,46 @@ export function App() {
     () => ({ newGame, playAgain: () => (currentInput ? start(currentInput) : newGame()) }),
     [currentInput, newGame, start],
   );
-
   const savedSummary = useMemo(() => (saved ? summarizeSavedGame(saved) : null), [saved]);
 
-  return (
-    <>
-      {screen.kind === "setup" ? (
-        <SetupScreen onStart={start} savedGame={savedSummary} onResume={resume} />
-      ) : (
-        <AppActionsContext.Provider value={actions}>
-          <GameView key={screen.gameId} session={screen.session} presenter={screen.presenter} onNewGame={newGame} />
-        </AppActionsContext.Provider>
-      )}
-      <MuteButton />
-    </>
-  );
+  if (screen.kind === "setup") {
+    return <SetupScreen onStart={start} savedGame={savedSummary} onResume={resume} onBack={onHome} />;
+  }
+  return <GameView key={screen.gameId} session={screen.session} presenter={screen.presenter} actions={actions} />;
+}
+
+// ---------------------------------------------------------------------------------------------
+// The table: shared by local and online games
+// ---------------------------------------------------------------------------------------------
+
+function OnlineGameView({ game, onHome }: { game: OnlineGame; onHome: () => void }) {
+  const { session, presenter } = game;
+  const actions = useMemo<AppActions>(() => ({ playAgain: session.rematch, newGame: onHome }), [session, onHome]);
+  return <GameView session={session} presenter={presenter} actions={actions} />;
 }
 
 interface GameViewProps {
   session: GameSession;
   presenter: Presenter;
-  onNewGame: () => void;
+  actions: AppActions;
 }
 
-function GameView({ session, presenter, onNewGame }: GameViewProps) {
-  // Mirror the local game into localStorage for as long as this view is mounted.
+function GameView({ session, presenter, actions }: GameViewProps) {
+  // Mirror a local game into localStorage for as long as this view is mounted.
   useEffect(() => (session.kind === "local" ? persistSession(session) : undefined), [session]);
 
   return (
-    <GameProvider session={session} presenter={presenter}>
-      <div className="app-game">
-        <Suspense fallback={<LoadingScreen />}>
-          <GameCanvas />
-          <Hud onNewGame={onNewGame} />
-          <div className="app-curtain" aria-hidden="true" />
-        </Suspense>
-      </div>
-    </GameProvider>
+    <AppActionsContext.Provider value={actions}>
+      <GameProvider session={session} presenter={presenter}>
+        <div className="app-game">
+          <Suspense fallback={<LoadingScreen />}>
+            <GameCanvas />
+            <Hud onNewGame={actions.newGame} />
+            <div className="app-curtain" aria-hidden="true" />
+          </Suspense>
+        </div>
+      </GameProvider>
+    </AppActionsContext.Provider>
   );
 }
 
