@@ -15,7 +15,9 @@ interface LobbyProps {
   onStart: () => void;
   /** Host: cancel the invite for everyone. Resolves false if it didn't work. */
   onCancel: () => Promise<boolean>;
-  /** Go back home (the seat is kept). */
+  /** Back to the home screen; the game stays in the player's list. */
+  onBack: () => void;
+  /** Guest: take this game off my list and go home. */
   onLeave: () => void;
 }
 
@@ -54,7 +56,7 @@ async function shareInvite(code: string, url: string): Promise<ShareResult | "di
 }
 
 /** Waiting room before the game starts: invite people, see who's here, set the rules, start. */
-export function Lobby({ room, mySeat, connected, onConfigure, onStart, onCancel, onLeave }: LobbyProps) {
+export function Lobby({ room, mySeat, connected, onConfigure, onStart, onCancel, onBack, onLeave }: LobbyProps) {
   const isHost = mySeat === HOST_SEAT;
   const uid = useId();
   const linkRef = useRef<HTMLInputElement>(null);
@@ -97,7 +99,7 @@ export function Lobby({ room, mySeat, connected, onConfigure, onStart, onCancel,
   };
 
   return (
-    <Screen onBack={onLeave} compact>
+    <Screen onBack={onBack} compact>
       <section className="setup__card online__invite" aria-labelledby={`${uid}-invite`}>
         <h2 id={`${uid}-invite`} className="setup__heading">
           {isHost ? "Invite your friends" : "Waiting for the host to start"}

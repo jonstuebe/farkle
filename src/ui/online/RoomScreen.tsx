@@ -35,7 +35,7 @@ const ERRORS: Record<RoomError, { title: string; body: string }> = {
     body: "It began before you joined, so there's no seat for this device. If you were playing on another phone or browser, open it there.",
   },
   expired: { title: "This game has expired", body: "Nobody played for a while, so it was put away." },
-  cancelled: { title: "The invite was cancelled", body: "The host called this game off before it started." },
+  cancelled: { title: "The invite was cancelled", body: "This game was called off before it started." },
 };
 
 /** Opens the connection for as long as the screen is mounted. Null for the first render. */
@@ -140,8 +140,23 @@ export function RoomScreen({ code, host, deviceId, name, onHome, onJoinAnother, 
         connected={state.status === "open"}
         onConfigure={session.configure}
         onStart={session.start}
-        onCancel={session.cancel}
-        onLeave={onHome}
+        onCancel={async () => {
+          const ok = await session.cancel();
+          // The host doesn't need to be told what they just did: straight back home.
+          if (ok) {
+            forgetRoom(code);
+            onHome();
+          }
+          return ok;
+        }}
+        onBack={onHome}
+        onLeave={() => {
+          // There is no "give up my seat" message in the protocol: leaving takes the game off
+          // this device's list, and the seat stays (the invite link brings the player back).
+          session.close();
+          forgetRoom(code);
+          onHome();
+        }}
       />
     );
   }

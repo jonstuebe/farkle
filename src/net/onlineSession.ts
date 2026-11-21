@@ -344,6 +344,17 @@ export function createOnlineSession(options: OnlineSessionOptions): OnlineSessio
       connectTimer = null;
       if (socket === created && roomState.status !== "open") lost();
     }, CONNECT_TIMEOUT_MS);
+    created.onopen = () => {
+      if (socket !== created) return;
+      // Say something right away. The server ignores it (nothing has been seen before 0), but a
+      // socket that has never sent a frame can miss the server's close when the room is cancelled
+      // or expires while its Durable Object is hibernating (cloudflare/workerd#8185).
+      try {
+        created.send(JSON.stringify({ type: "seen", seq: 0 } satisfies ClientMessage));
+      } catch {
+        // The close handler deals with a socket that died already.
+      }
+    };
     created.onmessage = (event) => {
       if (socket !== created) return;
       const message = parseServerMessage(event.data);
@@ -459,9 +470,15 @@ export function createOnlineSession(options: OnlineSessionOptions): OnlineSessio
       case "presence":
         receivePresence(message.connected);
         break;
-      case "refused":
-        finish(message.reason);
+      case "refused": {
+        // "missing" for a room we were just in means it went away under us: a lobby is
+        // cancelled by its host, a game expires. (The server also sends close codes for
+        // these, but they don't always arrive.)
+        const room = roomState.room;
+        if (message.reason === "missing" && room) finish(room.phase === "lobby" ? "cancelled" : "expired");
+        else finish(message.reason);
         break;
+      }
     }
   }
 

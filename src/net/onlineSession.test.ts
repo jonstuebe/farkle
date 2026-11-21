@@ -200,7 +200,8 @@ describe("connecting", () => {
     t.server.room = null;
     t.settle(RECONNECT_MAX_MS * 2);
     expect(t.server.sockets.at(-1)!.url.searchParams.get("intent")).toBe("join");
-    expect(host.getRoom()).toMatchObject({ status: "closed", error: "missing" });
+    // The lobby it was in is gone: shown as called off, not as a typo in the code.
+    expect(host.getRoom()).toMatchObject({ status: "closed", error: "cancelled" });
     expect(t.server.room).toBeNull();
   });
 
@@ -222,6 +223,24 @@ describe("connecting", () => {
       expect(bo.getRoom()).toMatchObject({ status: "closed", error: "cancelled" });
       expect(bo.getState().connected).toBe(false);
     });
+  });
+});
+
+describe("a room that goes away while open", () => {
+  test("refused/missing in the lobby reads as cancelled; during a game as expired", () => {
+    const t = setup();
+    t.connect(HOST, "Ada", "host");
+    const bo = t.connect(BO, "Bo");
+    t.server.push(t.server.socketOf(BO)!, { type: "refused", reason: "missing" });
+    t.settle();
+    expect(bo.getRoom()).toMatchObject({ status: "closed", error: "cancelled" });
+    expect(t.server.socketOf(BO)!.closedByClient).toBe(true);
+
+    const game = startedGame();
+    game.server.push(game.server.socketOf(BO)!, { type: "refused", reason: "missing" });
+    game.settle(60_000);
+    expect(game.bo.getRoom()).toMatchObject({ status: "closed", error: "expired" });
+    expect(game.server.sockets.filter((s) => s.url.searchParams.get("device") === BO)).toHaveLength(1);
   });
 });
 
@@ -378,7 +397,7 @@ describe("seen", () => {
     host.sendIntent({ type: "toggleDie", index: 0 });
     settle();
     const socket = server.socketOf(BO)!;
-    const seen = () => socket.sent.filter((m) => (m as { type: string }).type === "seen");
+    const seen = () => socket.sent.filter((m) => (m as { type: string; seq: number }).type === "seen" && (m as { seq: number }).seq > 0);
 
     bo.markSeen(1);
     expect(seen()).toEqual([{ type: "seen", seq: 1 }]); // first one goes straight out
@@ -445,7 +464,10 @@ describe("seen", () => {
     settle(RECONNECT_MAX_MS);
     expect(bo.getRoom().status).toBe("open");
     expect(bo.getState().seenFrom).toBe(0);
-    expect(server.socketOf(BO)!.sent).toEqual([{ type: "seen", seq: 2 }]);
+    expect(server.socketOf(BO)!.sent).toEqual([
+      { type: "seen", seq: 0 }, // the hello every socket sends on open
+      { type: "seen", seq: 2 },
+    ]);
     expect(server.room).toMatchObject({ seen: [0, 2] });
   });
 });
