@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
+import { ACESFilmicToneMapping, SRGBColorSpace } from "three";
 import { Table } from "./scene/Table";
 import { Die } from "./scene/Die";
+import { CameraRig, Lighting } from "./scene/Lighting";
+import { GRAVITY } from "./scene/tray";
 
 const DICE_COUNT = 6;
 
@@ -12,10 +15,21 @@ export function App() {
 
   return (
     <>
-      <Canvas shadows camera={{ position: [0, 9, 7], fov: 45 }}>
-        <ambientLight intensity={0.5} />
-        <directionalLight castShadow position={[4, 10, 4]} intensity={1.5} shadow-mapSize={[1024, 1024]} />
-        <Physics>
+      <Canvas
+        shadows="percentage"
+        dpr={[1, 2]}
+        camera={{ position: [0, 11, 7.5], fov: 40, near: 0.5, far: 200 }}
+        gl={{ antialias: true, powerPreference: "high-performance" }}
+        onCreated={({ gl }) => {
+          gl.toneMapping = ACESFilmicToneMapping;
+          gl.toneMappingExposure = 1.05;
+          gl.outputColorSpace = SRGBColorSpace;
+        }}
+      >
+        <color attach="background" args={["#0b0907"]} />
+        <CameraRig />
+        <Lighting />
+        <Physics gravity={GRAVITY}>
           <Table />
           {Array.from({ length: DICE_COUNT }, (_, i) => (
             <Die key={`${rollId}-${i}`} index={i} />
