@@ -1,0 +1,29 @@
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: #0f2a1d;
+  color: #f4f1e8;
+  font-family: system-ui, sans-serif;
+}
+
+.hud {
+  position: absolute;
+  inset: auto 0 24px 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.hud button {
+  pointer-events: auto;
+  font: inherit;
+  font-size: 1.1rem;
+  padding: 0.6em 1.4em;
+  border: none;
+  border-radius: 999px;
+  background: #f4f1e8;
+  color: #0f2a1d;
+  cursor: pointer;
+}

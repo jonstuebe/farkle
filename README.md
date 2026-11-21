@@ -1,17 +1,16 @@
-# React Transform Boilerplate
+# Farkle
 
-## Installation
+A 3D dice game in the browser: Vite + React + TypeScript, Three.js (via React Three Fiber),
+Rapier physics, hosted on Cloudflare Workers Static Assets.
 
-```bash
-git clone https://github.com/jonstuebe/react-transform-boilerplate.git
-cd react-transform-boilerplate
-npm install
-npm start
-open http://localhost:8000
-```
+## Scripts
 
-Transforms are enabled for files inside `src` (except `index.js`).
-
-## License
-
-CC0 (public domain)
+| Command              | What it does                                         |
+| -------------------- | ---------------------------------------------------- |
+| `bun install`        | Install dependencies                                 |
+| `bun run dev`        | Vite dev server with hot reload                      |
+| `bun run test`       | Run tests (vitest)                                   |
+| `bun run typecheck`  | Type-check with `tsc`                                |
+| `bun run build`      | Type-check and build to `dist/`                      |
+| `bun run preview:cf` | Build and serve `dist/` on the local Workers runtime |
+| `bun run deploy`     | Build and deploy to Cloudflare                       |
