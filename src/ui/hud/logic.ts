@@ -43,7 +43,7 @@ export const formatPoints = (n: number): string => n.toLocaleString("en-US");
 // Banners
 // ---------------------------------------------------------------------------
 
-export type BannerKind = "farkle" | "hotDice" | "banked" | "finalRound";
+export type BannerKind = "farkle" | "hotDice" | "banked" | "finalRound" | "turn";
 export type SoundKind = "farkle" | "hotDice" | "bank" | "win";
 
 export interface Banner {
@@ -290,4 +290,152 @@ export function scoringRows(table: ScoringTable): ScoringRow[] {
     row("Four of a kind + pair", [3, 3, 3, 3, 6, 6], table.fourOfAKindAndPair, true),
     row("Two triplets", [2, 2, 2, 5, 5, 5], table.twoTriplets, true),
   ];
+}
+
+// ---------------------------------------------------------------------------
+// Online play: seats, whose turn, replay
+// ---------------------------------------------------------------------------
+
+/** Who is at the table from this device's point of view. */
+export interface Table {
+  /** Online games give this device one seat; locally every seat is "mine". */
+  online: boolean;
+  mySeats: readonly number[];
+}
+
+export const LOCAL_TABLE: Table = { online: false, mySeats: [] };
+
+/** A seat this device plays in an online game (the one to call "You"). */
+export const isYou = (table: Table, seat: number): boolean => table.online && table.mySeats.includes(seat);
+
+/** True when the HUD should offer actions for the current player: always locally, my seat online. */
+export const isMyTurn = ({ phase, context }: HudView, table: Table): boolean =>
+  phase !== "done" && (!table.online || table.mySeats.includes(context.current));
+
+const currentName = (ctx: GameContext): string => ctx.players[ctx.current]?.name ?? "Someone";
+
+/** "Your turn" for my online seat, otherwise "Bo's turn". */
+export function turnTitle(view: HudView, table: Table): string {
+  if (isYou(table, view.context.current)) return "Your turn";
+  return `${currentName(view.context)}'s turn`;
+}
+
+/** Cue shown when a turn lands on someone new (after a replay, or when play reaches my seat). */
+export function turnCue(view: HudView, table: Table): Banner | null {
+  if (view.phase === "done") return null;
+  return { kind: "turn", text: turnTitle(view, table) };
+}
+
+/**
+ * What another player is doing, for when it isn't my turn. `away` (online, seat not connected)
+ * softens the wait: play is asynchronous, so they may be gone for a while.
+ */
+export function watchingHint({ phase, context: ctx }: HudView, away = false): Hint {
+  const name = currentName(ctx);
+  switch (phase) {
+    case "awaitingRoll":
+      return {
+        tone: "info",
+        text: away ? `${name} is away. They can roll whenever they're back` : `Waiting for ${name} to roll`,
+      };
+    case "rolling":
+      return { tone: "info", text: `${name} is rolling…` };
+    case "choosing": {
+      if (away) return { tone: "info", text: `${name} is away, mid-turn` };
+      const picked = selectionScore(ctx);
+      return {
+        tone: "info",
+        text: picked === null ? `${name} is choosing dice…` : `${name} is choosing dice… +${formatPoints(picked)} so far`,
+      };
+    }
+    case "farkled":
+      return {
+        tone: "bad",
+        text: ctx.turnPoints > 0 ? `${name} farkled and lost ${formatPoints(ctx.turnPoints)}` : `${name} farkled`,
+      };
+    case "done":
+      return { tone: "info", text: "Game over" };
+  }
+}
+
+/** Seats that still get a turn (current player first). Everyone, until the final round starts. */
+function seatsStillToPlay(ctx: GameContext): number[] {
+  const count = ctx.players.length;
+  const seats: number[] = [];
+  for (let step = 0; step < count; step++) {
+    const seat = (ctx.current + step) % count;
+    if (seat === ctx.finalRoundBy) break;
+    seats.push(seat);
+  }
+  return seats;
+}
+
+/** For the player who is waiting online: how far away their turn is. Null when it is their turn. */
+export function upNextText({ phase, context: ctx }: HudView, table: Table): string | null {
+  if (phase === "done" || !table.online) return null;
+  const waits = table.mySeats
+    .map((seat) => seatsStillToPlay(ctx).indexOf(seat))
+    .filter((turns) => turns >= 0);
+  if (waits.length === 0) return ctx.finalRoundBy === null ? null : "Final round: you've had your last turn";
+  const turns = Math.min(...waits);
+  if (turns === 0) return null;
+  return turns === 1 ? "You're up next" : `You're up in ${turns} turns`;
+}
+
+/** Why my own buttons are disabled although it is my turn, or null when nothing is in the way. */
+export function blockedReason(view: HudView, connected: boolean): string | null {
+  if (view.phase === "done") return null;
+  return connected ? null : "Reconnecting… you can move again in a moment";
+}
+
+export interface ReplayStatus {
+  /** e.g. "Catching up: Bo's turn…" */
+  text: string;
+  /** 0..1 of the log watched so far. */
+  progress: number;
+  /** e.g. "12 of 40 moves" */
+  detail: string;
+}
+
+export function replayStatus(view: HudView, table: Table, fed: number, total: number): ReplayStatus {
+  const whose = view.phase === "done" ? "the finish" : isYou(table, view.context.current) ? "your turn" : turnTitle(view, table);
+  const safeTotal = Math.max(total, 0);
+  const safeFed = Math.min(Math.max(fed, 0), safeTotal);
+  return {
+    text: `Catching up: ${whose}…`,
+    progress: safeTotal === 0 ? 1 : safeFed / safeTotal,
+    detail: `${safeFed} of ${safeTotal} moves`,
+  };
+}
+
+/** The scoreboard needs both the name and the "You" tag; other places want one short label. */
+export const seatLabel = (name: string, seat: number, table: Table): string => (isYou(table, seat) ? "You" : name);
+
+/** Game-over headline from this device's seat: "You win!", "You and Bo tie!", "Bo wins!". */
+export function onlineWinnerHeadline(players: readonly Player[], winnerIndices: readonly number[], table: Table): string {
+  if (!table.online) return winnerHeadline(players, winnerIndices);
+  // "You" first reads best: "You and Bo tie!"
+  const ordered = [...winnerIndices].sort((a, b) => Number(isYou(table, b)) - Number(isYou(table, a)));
+  const names = ordered.map((i) => seatLabel(players[i]?.name ?? "", i, table));
+  if (names.length === 0) return "Game over";
+  if (names.length === 1) return names[0] === "You" ? "You win!" : `${names[0]} wins!`;
+  return `${joinNames(names)} tie!`;
+}
+
+export interface GameOverLabels {
+  again: string;
+  leave: string;
+}
+
+export const gameOverLabels = (online: boolean): GameOverLabels =>
+  online ? { again: "Rematch", leave: "Back to games" } : { again: "Play again", leave: "New game" };
+
+/**
+ * Feedback for a run of state changes that landed in one go (a skipped replay, or a batch of
+ * moves after reconnecting). Nothing in the run was watched, so stay quiet apart from the one
+ * thing that still matters: the game ended.
+ */
+export function burstFeedback(first: HudView, last: HudView): Feedback {
+  const ended = first.phase !== "done" && last.phase === "done";
+  return { banners: [], sounds: ended ? ["win"] : [] };
 }

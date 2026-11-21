@@ -238,6 +238,71 @@
   }
 }
 
+/* Online seats: "You" tag and a connected dot. */
+.fk-player__you {
+  flex: none;
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(230, 183, 81, 0.22);
+  border: 1px solid var(--fk-line);
+  color: var(--fk-gold);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+.fk-player--you .fk-player__name {
+  flex: 0 1 auto;
+}
+
+.fk-player--you .fk-player__score {
+  margin-left: auto;
+}
+
+/* Phone chips are too narrow for a name and a tag: my seat simply reads "You". */
+@media (max-width: 759px) {
+  .fk-players .fk-player--you .fk-player__name {
+    display: none;
+  }
+
+  .fk-players .fk-player--you .fk-player__you {
+    flex: 1;
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: inherit;
+    letter-spacing: 0;
+    text-transform: none;
+    vertical-align: baseline;
+  }
+}
+
+.fk-presence {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(244, 236, 216, 0.4);
+}
+
+.fk-presence--here {
+  border-color: #6fd19c;
+  background: #49c283;
+  box-shadow: 0 0 0 2px rgba(73, 194, 131, 0.2);
+}
+
+/* With a presence dot the turn marker would be a second dot: the gold chip already says whose turn. */
+.fk-presence ~ .fk-player__name {
+  margin-left: -2px;
+}
+
+.fk-player:has(.fk-presence) .fk-player__marker {
+  display: none;
+}
+
 /* ---- Banners ------------------------------------------------------------ */
 
 .fk-banners {
@@ -282,6 +347,43 @@
 .fk-banner--banked {
   border-color: #5cc48c;
   background: rgba(17, 70, 43, 0.94);
+}
+
+.fk-banner--turn {
+  border-color: var(--fk-gold);
+  background: rgba(26, 16, 10, 0.94);
+  color: var(--fk-cream);
+}
+
+/* Connection lost: stays until the socket is back, never blocks the table. */
+.fk-net {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(240, 192, 106, 0.6);
+  background: rgba(58, 38, 10, 0.94);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  color: var(--fk-amber);
+  font-size: 0.9rem;
+  font-weight: 600;
+  animation: fk-pop 0.2s ease both;
+}
+
+.fk-net__spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(240, 192, 106, 0.3);
+  border-top-color: var(--fk-amber);
+  animation: fk-spin 0.9s linear infinite;
+}
+
+@keyframes fk-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .fk-banner--finalRound {
@@ -509,6 +611,119 @@
   }
 }
 
+/* ---- Dock: replay and waiting -------------------------------------------- */
+
+.fk-replay {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  padding: 8px 8px 8px 12px;
+  border-color: var(--fk-gold);
+}
+
+.fk-replay__info {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: center;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.fk-replay__text {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  color: var(--fk-gold);
+}
+
+.fk-replay__detail {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--fk-cream-dim);
+  white-space: nowrap;
+}
+
+.fk-replay__bar {
+  grid-column: 1;
+  grid-row: 2;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(244, 236, 216, 0.14);
+  overflow: hidden;
+}
+
+.fk-replay__bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--fk-gold-deep), #f3cd72);
+  transform-origin: left center;
+  transition: transform 0.3s ease;
+}
+
+.fk-button--skip {
+  flex: 0 0 auto;
+  min-width: 108px;
+  min-height: 48px;
+  background: linear-gradient(180deg, #f3cd72, var(--fk-gold-deep));
+  border-color: #ffe3a1;
+  color: #2a1a08;
+}
+
+.fk-waiting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 48px;
+  margin: 0;
+  padding: 8px 14px;
+  color: var(--fk-cream-dim);
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+.fk-waiting strong {
+  color: var(--fk-cream);
+  font-weight: 600;
+}
+
+.fk-waiting__dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.fk-waiting__dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fk-gold);
+  animation: fk-wait 1.4s ease-in-out infinite;
+}
+
+.fk-waiting__dots i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.fk-waiting__dots i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes fk-wait {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
 /* ---- Scoring reference -------------------------------------------------- */
 
 .fk-rules {
@@ -717,6 +932,16 @@
   gap: 8px;
 }
 
+.fk-rank__name .fk-player__you {
+  margin-left: 8px;
+}
+
+.fk-modal__note {
+  margin: -6px 0 12px;
+  font-size: 0.85rem;
+  color: var(--fk-amber);
+}
+
 @keyframes fk-pop {
   from {
     opacity: 0;
@@ -827,7 +1052,9 @@
   }
 
   .fk-turn,
-  .fk-actions {
+  .fk-actions,
+  .fk-replay,
+  .fk-waiting {
     flex: 1 1 0;
   }
 
@@ -849,6 +1076,9 @@
     animation: fk-fade 0.2s ease both;
   }
 
+  .fk-net__spinner,
+  .fk-waiting__dots i,
+  .fk-net,
   .fk-button--hot,
   .fk-modal,
   .fk-rules,
@@ -856,7 +1086,8 @@
     animation: none;
   }
 
-  .fk-button {
+  .fk-button,
+  .fk-replay__bar span {
     transition: none;
   }
 }

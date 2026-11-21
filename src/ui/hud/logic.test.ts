@@ -3,7 +3,20 @@ import { createActor } from "xstate";
 import { farkleMachine, type GameInput } from "../../game/machine";
 import { DEFAULT_SCORING, type DieValue } from "../../game/scoring";
 import {
+  LOCAL_TABLE,
   actionsFor,
+  blockedReason,
+  burstFeedback,
+  gameOverLabels,
+  isMyTurn,
+  isYou,
+  onlineWinnerHeadline,
+  replayStatus,
+  seatLabel,
+  turnCue,
+  turnTitle,
+  upNextText,
+  watchingHint,
   diffFeedback,
   finalRoundInfo,
   finalRoundText,
@@ -15,6 +28,7 @@ import {
   viewOf,
   winnerHeadline,
   type Feedback,
+  type Table,
 } from "./logic";
 
 /** A game whose every transition is recorded as HUD feedback. */
@@ -331,5 +345,156 @@ describe("scoringRows", () => {
     expect(points["Three 1s"]).toBe(300);
     expect(points["Three 4s"]).toBe(200);
     expect(points["Straight"]).toBe(2000);
+  });
+});
+
+describe("online play", () => {
+  // This device is Bo (seat 1) in a three-player online game.
+  const me: Table = { online: true, mySeats: [1] };
+  const game = () => startGame({ players: ["Ada", "Bo", "Cy"] });
+  const passTurn = (g: ReturnType<typeof game>) => {
+    g.roll(2, 3, 4, 6, 6, 2);
+    g.send({ type: "passTurn" });
+  };
+
+  test("only my online seat is 'You'; local seats never are", () => {
+    expect(isYou(me, 1)).toBe(true);
+    expect(isYou(me, 0)).toBe(false);
+    expect(isYou({ online: false, mySeats: [0, 1, 2] }, 1)).toBe(false);
+    expect(isYou(LOCAL_TABLE, 0)).toBe(false);
+    expect(seatLabel("Bo", 1, me)).toBe("You");
+    expect(seatLabel("Ada", 0, me)).toBe("Ada");
+    expect(seatLabel("Bo", 1, LOCAL_TABLE)).toBe("Bo");
+  });
+
+  test("my turn: every turn locally, only my seat online, never once the game is over", () => {
+    const g = game();
+    expect(isMyTurn(g.view(), LOCAL_TABLE)).toBe(true);
+    expect(isMyTurn(g.view(), me)).toBe(false);
+    expect(turnTitle(g.view(), me)).toBe("Ada's turn");
+    passTurn(g);
+    expect(isMyTurn(g.view(), me)).toBe(true);
+    expect(turnTitle(g.view(), me)).toBe("Your turn");
+    expect(turnTitle(g.view(), LOCAL_TABLE)).toBe("Bo's turn");
+    expect(turnCue(g.view(), me)).toEqual({ kind: "turn", text: "Your turn" });
+
+    const solo = startGame({ players: ["Ada"], rules: { targetScore: 1000 } });
+    solo.roll(1, 1, 1, 2, 3, 4);
+    solo.select(0, 1, 2);
+    solo.send({ type: "bank" });
+    expect(isMyTurn(solo.view(), LOCAL_TABLE)).toBe(false);
+    expect(turnCue(solo.view(), LOCAL_TABLE)).toBeNull();
+  });
+
+  test("watching another player: what they are doing in each phase", () => {
+    const g = game();
+    expect(watchingHint(g.view())).toEqual({ tone: "info", text: "Waiting for Ada to roll" });
+    g.send({ type: "roll" });
+    expect(watchingHint(g.view()).text).toBe("Ada is rolling…");
+    g.send({ type: "rolled", values: [1, 2, 3, 4, 6, 6] });
+    expect(watchingHint(g.view()).text).toBe("Ada is choosing dice…");
+    g.select(0);
+    expect(watchingHint(g.view()).text).toBe("Ada is choosing dice… +100 so far");
+    g.roll(2, 3, 4, 6, 6);
+    expect(watchingHint(g.view())).toEqual({ tone: "bad", text: "Ada farkled and lost 100" });
+    g.send({ type: "passTurn" });
+    passTurn(g);
+    g.roll(2, 3, 4, 6, 6, 2);
+    expect(watchingHint(g.view()).text).toBe("Cy farkled");
+  });
+
+  test("an away player gets a patient message", () => {
+    const g = game();
+    expect(watchingHint(g.view(), true).text).toBe("Ada is away. They can roll whenever they're back");
+    g.roll(1, 2, 3, 4, 6, 6);
+    expect(watchingHint(g.view(), true).text).toBe("Ada is away, mid-turn");
+    // What already happened is reported the same either way.
+    g.select(0);
+    g.roll(2, 3, 4, 6, 6);
+    expect(watchingHint(g.view(), true).text).toBe("Ada farkled and lost 100");
+  });
+
+  test("how long until my turn", () => {
+    const cy: Table = { online: true, mySeats: [2] };
+    const g = game();
+    expect(upNextText(g.view(), cy)).toBe("You're up in 2 turns");
+    expect(upNextText(g.view(), me)).toBe("You're up next");
+    expect(upNextText(g.view(), { online: true, mySeats: [0] })).toBeNull();
+    expect(upNextText(g.view(), LOCAL_TABLE)).toBeNull();
+  });
+
+  test("in the final round, a player whose turns are done is told so", () => {
+    const g = startGame({ players: ["Ada", "Bo", "Cy"], rules: { targetScore: 1000 } });
+    passTurn(g);
+    // Bo (me) reaches the target; Cy and Ada still roll, I don't.
+    g.roll(1, 1, 1, 2, 3, 4);
+    g.select(0, 1, 2);
+    g.send({ type: "bank" });
+    expect(upNextText(g.view(), me)).toBe("Final round: you've had your last turn");
+    expect(upNextText(g.view(), { online: true, mySeats: [0] })).toBe("You're up next");
+    expect(upNextText(g.view(), { online: true, mySeats: [2] })).toBeNull();
+  });
+
+  test("the HUD's burst detection relies on one snapshot per event", () => {
+    const actor = createActor(farkleMachine, { input: { players: ["Ada", "Bo"] } }).start();
+    let emitted = 0;
+    actor.subscribe(() => emitted++);
+    const expectOne = (event: Parameters<typeof actor.send>[0]) => {
+      const before = emitted;
+      actor.send(event);
+      expect(emitted - before).toBe(1);
+    };
+    expectOne({ type: "roll" });
+    expectOne({ type: "rolled", values: [1, 2, 3, 4, 6, 6] });
+    expectOne({ type: "toggleDie", index: 0 });
+    // Banking passes through the `turnEnded` choice state: still a single snapshot.
+    expectOne({ type: "bank" });
+  });
+
+  test("replay status names the turn being replayed and tracks progress", () => {
+    const g = game();
+    expect(replayStatus(g.view(), me, 3, 12)).toEqual({
+      text: "Catching up: Ada's turn…",
+      progress: 0.25,
+      detail: "3 of 12 moves",
+    });
+    passTurn(g);
+    expect(replayStatus(g.view(), me, 12, 12)).toMatchObject({ text: "Catching up: your turn…", progress: 1 });
+    // Defensive: an empty or shrinking log never divides by zero or overshoots.
+    expect(replayStatus(g.view(), me, 0, 0).progress).toBe(1);
+    expect(replayStatus(g.view(), me, 9, 4)).toMatchObject({ progress: 1, detail: "4 of 4 moves" });
+  });
+
+  test("my buttons explain themselves while reconnecting", () => {
+    const g = game();
+    expect(blockedReason(g.view(), true)).toBeNull();
+    expect(blockedReason(g.view(), false)).toMatch(/^Reconnecting/);
+  });
+
+  test("game over: headline from my seat and online button labels", () => {
+    const players = [
+      { name: "Ada", score: 900 },
+      { name: "Bo", score: 900 },
+      { name: "Cy", score: 100 },
+    ];
+    expect(onlineWinnerHeadline(players, [1], me)).toBe("You win!");
+    expect(onlineWinnerHeadline(players, [0], me)).toBe("Ada wins!");
+    expect(onlineWinnerHeadline(players, [0, 1], me)).toBe("You and Ada tie!");
+    expect(onlineWinnerHeadline(players, [0, 1], LOCAL_TABLE)).toBe("Ada and Bo tie!");
+    expect(gameOverLabels(true)).toEqual({ again: "Rematch", leave: "Back to games" });
+    expect(gameOverLabels(false)).toEqual({ again: "Play again", leave: "New game" });
+  });
+
+  test("a skipped run of moves is silent unless it ended the game", () => {
+    const g = startGame({ players: ["Ada", "Bo"], rules: { targetScore: 1000 } });
+    const start = g.view();
+    g.roll(1, 1, 1, 2, 3, 4);
+    g.select(0, 1, 2);
+    g.send({ type: "bank" });
+    expect(burstFeedback(start, g.view())).toEqual({ banners: [], sounds: [] });
+    g.roll(2, 3, 4, 6, 6, 2);
+    g.send({ type: "passTurn" });
+    expect(burstFeedback(start, g.view())).toEqual({ banners: [], sounds: ["win"] });
+    expect(burstFeedback(g.view(), g.view())).toEqual({ banners: [], sounds: [] });
   });
 });
