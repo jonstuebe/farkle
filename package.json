@@ -11,7 +11,7 @@
     "types": "npx cf workers types",
     "typecheck": "bun run types && tsc --noEmit && tsc --noEmit -p worker",
     "deploy": "npx cf deploy",
-    "smoke": "node scripts/room-smoke.ts"
+    "smoke": "bun scripts/room-smoke.ts"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.9",
