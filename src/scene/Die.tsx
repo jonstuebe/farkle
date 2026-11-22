@@ -48,6 +48,8 @@ export interface DieReading {
   gliding: boolean;
   /** The face it shows right now. */
   value: DieValue;
+  /** Where its centre is. */
+  position: Vec3;
 }
 
 export interface GlideOptions {
@@ -160,8 +162,9 @@ export function Die({ index, ref, initialPosition, interactive = false, selected
       },
       read() {
         const rigidBody = body.current;
-        if (!rigidBody) return { gliding: true, value: 1 };
-        return { gliding: glide.current !== null, value: topFace(rigidBody.rotation()) };
+        if (!rigidBody) return { gliding: true, value: 1, position: [0, 0, 0] };
+        const t = rigidBody.translation();
+        return { gliding: glide.current !== null, value: topFace(rigidBody.rotation()), position: [t.x, t.y, t.z] };
       },
     }),
     [],

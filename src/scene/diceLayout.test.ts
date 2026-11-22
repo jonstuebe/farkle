@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import { Euler, Quaternion, Vector3 } from "three";
 import { FACE_NORMALS, topFace, topFaceAlignment } from "./dice";
 import {
-  assignHeldSlots,
   faceRemapQuaternion,
   faceUpQuaternion,
-  heldSlotPosition,
   impactStrength,
   isCocked,
+  keepGroups,
+  KEPT_GROUP_PITCH,
+  KEPT_PITCH,
+  layoutKeptLane,
   levelQuaternion,
   makeThrow,
   phaseOf,
@@ -20,35 +22,98 @@ import { DIE_SIZE } from "./dice";
 
 const lcg = (seed: number) => () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
 
-describe("held slots", () => {
-  it("fills slots left to right in index order", () => {
-    expect(assignHeldSlots([], [false, true, false, true, true, false])).toEqual([null, 0, null, 1, 2, null]);
+describe("kept lane", () => {
+  const xs = (keeps: (number | null)[]) => layoutKeptLane(keeps).positions.map((p) => (p ? Math.round(p[0] * 1000) / 1000 : null));
+  /** Every way to split six held dice into keeps (each die's keep, non-decreasing labels not required). */
+  const everySplit = (): number[][] => {
+    const out: number[][] = [];
+    const walk = (prefix: number[], groups: number) => {
+      if (prefix.length === 6) return void out.push(prefix);
+      for (let keep = 0; keep <= groups; keep++) walk([...prefix, keep], Math.max(groups, keep + 1));
+    };
+    walk([], 0);
+    return out;
+  };
+
+  it("leaves dice that aren't held out", () => {
+    expect(layoutKeptLane(Array(6).fill(null))).toEqual({ positions: Array(6).fill(null), dividers: [] });
+    expect(xs([null, 0, null, null, null, null])).toEqual([null, 0, null, null, null, null]);
   });
 
-  it("keeps earlier dice where they are when more are held", () => {
-    const first = assignHeldSlots(Array(6).fill(null), [false, false, false, true, false, true]);
-    expect(first).toEqual([null, null, null, 0, null, 1]);
-    expect(assignHeldSlots(first, [true, false, true, true, false, true])).toEqual([2, null, 3, 0, null, 1]);
+  it("puts dice kept together shoulder to shoulder, centred, in index order", () => {
+    expect(xs([null, 0, null, 0, 0, null])).toEqual([null, -KEPT_PITCH, null, 0, KEPT_PITCH, null]);
+    expect(layoutKeptLane([null, 0, null, 0, 0, null]).dividers).toEqual([]);
   });
 
-  it("frees every slot on a reset (new turn / hot dice)", () => {
-    expect(assignHeldSlots([0, 1, 2, 3, 4, 5], Array(6).fill(false))).toEqual(Array(6).fill(null));
+  it("orders groups oldest keep first, whatever the dice indices", () => {
+    // Die 5 was kept first, then dice 0 and 2, then die 3.
+    const { positions, dividers } = layoutKeptLane([1, null, 1, 2, null, 0]);
+    const x = (i: number) => positions[i]![0];
+    expect(x(5)).toBeLessThan(x(0));
+    expect(x(0)).toBeLessThan(x(2));
+    expect(x(2)).toBeLessThan(x(3));
+    expect(x(2) - x(0)).toBeCloseTo(KEPT_PITCH, 9);
+    expect(x(0) - x(5)).toBeCloseTo(KEPT_GROUP_PITCH, 9);
+    expect(x(3) - x(2)).toBeCloseTo(KEPT_GROUP_PITCH, 9);
+    expect(dividers).toHaveLength(2);
+    expect(dividers[0]).toBeCloseTo((x(5) + x(0)) / 2, 9);
+    expect(dividers[1]).toBeCloseTo((x(2) + x(3)) / 2, 9);
   });
 
-  it("reuses a freed slot", () => {
-    expect(assignHeldSlots([0, 1, null], [false, true, true])).toEqual([null, 1, 0]);
+  it("three 5s kept over three rolls are three separate groups, not a set", () => {
+    const apart = layoutKeptLane([0, 1, 2, null, null, null]);
+    const together = layoutKeptLane([0, 0, 0, null, null, null]);
+    expect(apart.dividers).toHaveLength(2);
+    expect(together.dividers).toHaveLength(0);
+    const gap = (lane: typeof apart) => lane.positions[1]![0] - lane.positions[0]![0] - DIE_SIZE;
+    expect(gap(together)).toBeLessThan(DIE_SIZE * 0.2);
+    expect(gap(apart)).toBeGreaterThan(DIE_SIZE * 0.75);
   });
 
-  it("places slots inside the lane, apart from each other, flat on the felt", () => {
-    const half = DIE_SIZE / 2;
-    for (let slot = 0; slot < 6; slot++) {
-      const [x, y, z] = heldSlotPosition(slot);
-      expect(y).toBe(REST_Y);
-      expect(Math.abs(x) + half).toBeLessThan(TRAY_WIDTH / 2);
-      expect(z - half).toBeGreaterThan(DIVIDER_Z + 0.07);
-      expect(z + half).toBeLessThan(TRAY_DEPTH / 2);
-      if (slot > 0) expect(x - heldSlotPosition(slot - 1)[0]).toBeGreaterThan(DIE_SIZE);
+  it("keeps earlier groups in order and intact when another keep joins", () => {
+    const before = layoutKeptLane([0, 0, null, null, 1, null]).positions;
+    const after = layoutKeptLane([0, 0, 2, null, 1, 2]).positions;
+    for (const [a, b] of [[0, 1], [1, 4]] as const) {
+      expect(after[b]![0] - after[a]![0]).toBeCloseTo(before[b]![0] - before[a]![0], 9);
     }
+    // Everything already there slides the same way by the same amount.
+    expect(after[0]![0] - before[0]![0]).toBeCloseTo(after[4]![0] - before[4]![0], 9);
+    expect(after[2]![0]).toBeGreaterThan(after[4]![0]);
+  });
+
+  it("keep numbers needn't start at zero (after hot dice)", () => {
+    expect(xs([3, 3, null, 4, null, null])).toEqual(xs([0, 0, null, 1, null, null]));
+  });
+
+  it("fits six dice in any grouping, up to six groups: inside the lane, never overlapping", () => {
+    const half = DIE_SIZE / 2;
+    const splits = everySplit();
+    expect(splits).toHaveLength(203); // Bell number B6
+    for (const split of splits) {
+      const { positions, dividers } = layoutKeptLane(split);
+      const sorted = positions.map((p) => p!).sort((a, b) => a[0] - b[0]);
+      expect(dividers).toHaveLength(new Set(split).size - 1);
+      sorted.forEach(([x, y, z], n) => {
+        expect(y).toBe(REST_Y);
+        expect(Math.abs(x) + half).toBeLessThan(TRAY_WIDTH / 2 - 0.2);
+        expect(z - half).toBeGreaterThan(DIVIDER_Z + 0.07);
+        expect(z + half).toBeLessThan(TRAY_DEPTH / 2);
+        if (n > 0) expect(x - sorted[n - 1]![0]).toBeGreaterThan(DIE_SIZE);
+      });
+      // Centred.
+      expect(sorted[0]![0] + sorted[5]![0]).toBeCloseTo(0, 9);
+    }
+  });
+
+  it("reads each die's group from the game state", () => {
+    expect(
+      keepGroups([
+        { held: true, keep: 2 },
+        { held: false, keep: null },
+        { held: true, keep: 0 },
+        { held: true }, // a save from before keeps were recorded
+      ]),
+    ).toEqual([2, null, 0, 0]);
   });
 
   it("places waiting dice inside the play area, apart from each other", () => {

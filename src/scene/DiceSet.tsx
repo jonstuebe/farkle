@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef } from "react";
-import { useFrame } from "@react-three/fiber";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useFrame, useThree } from "@react-three/fiber";
 import { useRapier } from "@react-three/rapier";
 import { Quaternion, Vector3 } from "three";
 import { playDiceHit, playSelect } from "../audio/sfx";
@@ -13,8 +13,17 @@ import {
   useSnapCount,
   useThrowSettled,
 } from "../game/react";
-import { Die, type DieHandle } from "./Die";
-import { assignHeldSlots, faceUpQuaternion, heldSlotPosition, phaseOf, readyPosition, type Phase } from "./diceLayout";
+import { Die, type DieHandle, type DieReading } from "./Die";
+import {
+  faceUpQuaternion,
+  keepGroups,
+  layoutKeptLane,
+  phaseOf,
+  readyPosition,
+  type Phase,
+  type Vec3,
+} from "./diceLayout";
+import { KeptLaneMarks } from "./KeptLaneMarks";
 import { planThrow, samplePlan, type ThrowPlan } from "./throwSim";
 
 declare global {
@@ -23,6 +32,8 @@ declare global {
     __farkle?: unknown;
     /** Dev only: lets tests check that every throw settled once, on the right faces. */
     __farkleStats?: DiceStats;
+    /** Dev only: what each die shows and where it is right now. */
+    __farkleDice?: () => DieReading[];
   }
 }
 
@@ -101,9 +112,19 @@ interface ActiveThrow {
 interface Seen {
   phase: Phase | null;
   dice: readonly GameDie[] | null;
-  slots: (number | null)[];
+  /** Where each held die rests in the kept lane (null = not held). */
+  spots: (Vec3 | null)[];
   snap: number;
 }
+
+/**
+ * Fired on `window` once per canvas mount, when the physics engine is up and the tray and
+ * dice have been drawn: the app keeps its loading screen until then. The canvas element
+ * also gets `data-scene-ready="true"`, for anything that starts listening late.
+ */
+export const SCENE_READY_EVENT = "farkle:scene-ready";
+/** Frames drawn with the dice seated before the scene is called ready (shaders compile in the first). */
+const READY_AFTER_FRAMES = 2;
 
 const _position = new Vector3();
 const _rotation = new Quaternion();
@@ -138,7 +159,10 @@ export function DiceSet() {
   canActRef.current = canAct;
 
   const handles = useRef<(DieHandle | null)[]>([]);
-  const seen = useRef<Seen>({ phase: null, dice: null, slots: [], snap: 0 });
+  const seen = useRef<Seen>({ phase: null, dice: null, spots: [], snap: 0 });
+  const canvas = useThree((state) => state.gl.domElement);
+  /** Frames drawn since the dice were first seated; null once the ready event has been sent. */
+  const framesDrawn = useRef<number | null>(0);
   const active = useRef<ActiveThrow | null>(null);
   /** seq of the last throw started, so a throw is never animated twice. */
   const startedSeq = useRef<number | null>(null);
@@ -147,11 +171,13 @@ export function DiceSet() {
   const phase = useGameSelector((snapshot) => phaseOf(snapshot.value));
   const dice = useGameSelector((snapshot) => snapshot.context.dice);
   const selected = useGameSelector((snapshot) => snapshot.context.selected);
+  const dividers = useMemo(() => layoutKeptLane(keepGroups(dice)).dividers, [dice]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     window.__farkle = actor;
     window.__farkleStats = stats;
+    window.__farkleDice = () => DICE.flatMap((i) => handles.current[i]?.read() ?? []);
     return () => {
       if (window.__farkle === actor) delete window.__farkle;
     };
@@ -181,51 +207,66 @@ export function DiceSet() {
     const pending = pendingRef.current;
     const snap = snapRef.current;
 
+    // Each pass through here after the first means one more frame has been drawn.
+    if (last.phase !== null && framesDrawn.current !== null && ++framesDrawn.current > READY_AFTER_FRAMES) {
+      framesDrawn.current = null;
+      canvas.dataset.sceneReady = "true";
+      window.dispatchEvent(new Event(SCENE_READY_EVENT));
+    }
+
     // --- 1. keep the resting dice in step with the game state ---------------------------
     const first = last.phase === null;
     const snapped = snap !== last.snap;
     if (first || snapped || now !== last.phase || context.dice !== last.dice) {
-      const slots = assignHeldSlots(last.slots, context.dice.map((d) => d.held));
+      const spots = layoutKeptLane(keepGroups(context.dice)).positions;
 
       if (first || snapped) {
         // Opening a game, Skip, or a catch-up jump: no animation, just put every die where
         // the game says it is, showing its value. Any throw in progress is abandoned.
         active.current = null;
         DICE.forEach((i) => {
-          const slot = slots[i] ?? null;
+          const spot = spots[i] ?? null;
           const value = context.dice[i]?.value ?? null;
           die(i).place(
-            slot !== null ? heldSlotPosition(slot) : readyPosition(i),
+            spot ?? readyPosition(i),
             value !== null ? faceUpQuaternion(value) : "square",
           );
         });
       } else {
         DICE.forEach((i) => {
-          const slot = slots[i] ?? null;
+          const spot = spots[i] ?? null;
+          const was = last.spots[i] ?? null;
           const value = context.dice[i]?.value ?? null;
           const shown = die(i).read();
           const wrongFace = value !== null && !shown.gliding && shown.value !== value;
-          if (slot !== null && slot !== last.slots[i]) {
-            // Kept dice hop into the lane, each to its own stable slot.
-            die(i).glideTo(heldSlotPosition(slot), {
+          if (spot !== null && was === null) {
+            // Newly kept dice hop over the divider into the lane, next to the rest of their keep.
+            die(i).glideTo(spot, {
               orientation: wrongFace ? faceUpQuaternion(value) : "square",
               duration: 0.45,
               arc: 1.1,
             });
+          } else if (spot !== null && was !== null && spot[0] !== was[0]) {
+            // Earlier keeps slide along the felt to make room for the new group.
+            die(i).glideTo(spot, {
+              orientation: wrongFace ? faceUpQuaternion(value) : "square",
+              duration: 0.45,
+              arc: 0,
+            });
           } else if (wrongFace && active.current === null) {
             // Safety net: the state moved on without a throw we animated. Show the truth.
             stats.reseats += 1;
-            die(i).place(slot !== null ? heldSlotPosition(slot) : readyPosition(i), faceUpQuaternion(value));
+            die(i).place(spot ?? readyPosition(i), faceUpQuaternion(value));
           }
         });
         if (now === "awaitingRoll" && last.phase !== "awaitingRoll") {
           // New turn: gather the dice into the waiting row.
           DICE.forEach((i) => {
-            if (slots[i] == null) die(i).glideTo(readyPosition(i), { orientation: "square", duration: 0.5, arc: 0.9 });
+            if (spots[i] == null) die(i).glideTo(readyPosition(i), { orientation: "square", duration: 0.5, arc: 0.9 });
           });
         }
       }
-      seen.current = { phase: now, dice: context.dice, slots, snap };
+      seen.current = { phase: now, dice: context.dice, spots, snap };
     }
 
     // --- 2. start the pending throw (once) -------------------------------------------------
@@ -320,6 +361,7 @@ export function DiceSet() {
 
   return (
     <>
+      <KeptLaneMarks dividers={dividers} />
       {DICE.map((i) => {
         const state = dice[i];
         const free = !!state && !state.held;

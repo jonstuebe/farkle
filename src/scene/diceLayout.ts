@@ -13,34 +13,55 @@ export const REST_Y = DIE_SIZE / 2;
 
 const SLOT_SPACING = 1.05;
 
-/** Centre of the n-th place (0..5, left to right) in the kept-dice lane. */
-export function heldSlotPosition(slot: number): Vec3 {
-  return [(slot - 2.5) * SLOT_SPACING, REST_Y, TRAY_DEPTH / 2 - KEEP_LANE_DEPTH / 2];
-}
+/** Centre-to-centre distance of neighbouring dice kept together: nearly touching, so they read as one set. */
+export const KEPT_PITCH = 0.9;
+/** Centre-to-centre distance across two keeps: a gap most of a die wide. */
+export const KEPT_GROUP_PITCH = 1.6;
+const LANE_Z = TRAY_DEPTH / 2 - KEEP_LANE_DEPTH / 2;
 
 /** Where die `index` waits, in a neat row mid-table, before the first throw of a turn. */
 export function readyPosition(index: number): Vec3 {
   return [(index - 2.5) * SLOT_SPACING, REST_Y, PLAY_CENTER_Z];
 }
 
+export interface KeptLane {
+  /** Resting place per die; null = not held. */
+  positions: (Vec3 | null)[];
+  /** X of the middle of each gap between two keeps, left to right. */
+  dividers: number[];
+}
+
 /**
- * Lane slot per die (null = not held). Dice keep the slot they were given, so the row
- * doesn't reshuffle as more dice are kept; newly held dice fill the lowest free slots in
- * index order.
+ * Lays the kept-dice lane out in groups, one per keep, oldest on the left: dice kept from
+ * the same roll sit shoulder to shoulder, and a wide gap separates one keep from the next,
+ * because a combination only counts within one roll (three 5s kept over three rolls are
+ * three lone 5s, not a set). The whole row is centred, so earlier groups slide along when a
+ * new one joins. `keeps[i]` is die i's keep (`Die.keep`), or null when it isn't held.
  */
-export function assignHeldSlots(
-  previous: readonly (number | null)[],
-  held: readonly boolean[],
-): (number | null)[] {
-  const slots = held.map((isHeld, i) => (isHeld ? (previous[i] ?? null) : null));
-  const taken = new Set(slots.filter((slot): slot is number => slot !== null));
-  let next = 0;
-  return slots.map((slot, i) => {
-    if (!held[i] || slot !== null) return slot;
-    while (taken.has(next)) next++;
-    taken.add(next);
-    return next;
+export function layoutKeptLane(keeps: readonly (number | null)[]): KeptLane {
+  const held = keeps
+    .flatMap((keep, index) => (keep === null ? [] : [{ keep, index }]))
+    .sort((a, b) => a.keep - b.keep || a.index - b.index);
+  const xs: number[] = [];
+  const dividers: number[] = [];
+  held.forEach((die, n) => {
+    if (n === 0) return void xs.push(0);
+    const previous = xs[n - 1]!;
+    const sameKeep = held[n - 1]!.keep === die.keep;
+    xs.push(previous + (sameKeep ? KEPT_PITCH : KEPT_GROUP_PITCH));
+    if (!sameKeep) dividers.push(previous + KEPT_GROUP_PITCH / 2);
   });
+  const shift = -(xs[xs.length - 1] ?? 0) / 2;
+  const positions: (Vec3 | null)[] = keeps.map(() => null);
+  held.forEach((die, n) => {
+    positions[die.index] = [xs[n]! + shift, REST_Y, LANE_Z];
+  });
+  return { positions, dividers: dividers.map((x) => x + shift) };
+}
+
+/** The keep each die belongs to, for layoutKeptLane (saves from before keeps were recorded: one group). */
+export function keepGroups(dice: readonly { held: boolean; keep?: number | null }[]): (number | null)[] {
+  return dice.map((die) => (die.held ? (die.keep ?? 0) : null));
 }
 
 /** Below this the top face is visibly tilted (about 10 degrees off flat). */
