@@ -212,6 +212,10 @@ export function applyMessage(
     case "start":
       return changed(room, start(room, bySeat));
 
+    case "react":
+      // TODO(server worker): relay reactions (coordinator stub so the tree typechecks).
+      return { kind: "ignored" };
+
     case "leave":
       // The host cancels the room instead, and once the game has started seats are permanent.
       if (room.phase !== "lobby" || bySeat === HOST_SEAT) return { kind: "ignored" };

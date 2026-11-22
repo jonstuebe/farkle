@@ -123,7 +123,12 @@ export type ClientMessage =
   /** The player has watched the log up to (not including) `seq`. Never moves backwards. */
   | { type: "seen"; seq: number }
   /** Any seated player, only after the game is over. Starts a new game with the same seats. */
-  | { type: "rematch"; gameNumber: number };
+  | { type: "rematch"; gameNumber: number }
+  /**
+   * A quick emoji to everyone else in the room (lobby or game). Not stored and not replayed;
+   * the server drops unknown names and rate-limits each socket (REACTION_COOLDOWN_MS).
+   */
+  | { type: "react"; reaction: Reaction };
 
 export type Refusal =
   /** No room with this code (never created, cancelled, or expired). */
@@ -141,7 +146,69 @@ export type ServerMessage =
   /** Someone connected or disconnected. */
   | { type: "presence"; connected: boolean[] }
   /** Sent just before the server closes the socket (close codes below). */
-  | { type: "refused"; reason: Refusal };
+  | { type: "refused"; reason: Refusal }
+  /** A seated player reacted. Sent to every socket except the sender's device. */
+  | { type: "reaction"; seat: number; reaction: Reaction };
+
+// ---------------------------------------------------------------------------
+// Reactions. Only these, so there is nothing to moderate. Sent by name, never as free text.
+// ---------------------------------------------------------------------------
+
+export const REACTIONS = ["thumbsUp", "laugh", "wow", "grimace", "fire", "clap", "pray", "skull"] as const;
+export type Reaction = (typeof REACTIONS)[number];
+export const REACTION_EMOJI: Record<Reaction, string> = {
+  thumbsUp: "👍",
+  laugh: "😂",
+  wow: "😮",
+  grimace: "😬",
+  fire: "🔥",
+  clap: "👏",
+  pray: "🙏",
+  skull: "💀",
+};
+export const REACTION_LABEL: Record<Reaction, string> = {
+  thumbsUp: "Thumbs up",
+  laugh: "Laugh",
+  wow: "Wow",
+  grimace: "Yikes",
+  fire: "Fire",
+  clap: "Clap",
+  pray: "Please",
+  skull: "Dead",
+};
+export const isReaction = (value: unknown): value is Reaction =>
+  typeof value === "string" && (REACTIONS as readonly string[]).includes(value);
+/** Per socket. Faster reactions are dropped silently. */
+export const REACTION_COOLDOWN_MS = 1000;
+
+// ---------------------------------------------------------------------------
+// Turn alerts (Web Push). A device that turns alerts on POSTs its subscription to
+// `/api/rooms/:code/push` for each online game it is seated in (DELETE with {device} turns it
+// off). The Room sends a push to a seated device when that seat has something to do and the
+// device has no open socket. Replies: 204 ok, 400 bad body, 403 device not seated, 404 no room.
+// ---------------------------------------------------------------------------
+
+/** Public half of the VAPID key pair (scripts/vapid.ts). The private half is the Worker secret VAPID_PRIVATE_KEY (.dev.vars locally). */
+export const VAPID_PUBLIC_KEY = "BDmLWwOcv4WS1Fd1wPG1OPOmRztPfB1Lq5GoxCUfe5zWP2N27Ke91d5r3Su9cKZsY4uK25aVnc1q82I081lYud8";
+/** Push services want a contact for the sender. TODO(deploy): set to the real farkle URL. */
+export const VAPID_SUBJECT = "https://farkle.jonstuebe.com";
+
+/** PushSubscription.toJSON(): the part the server needs to reach the device. */
+export interface PushSubscriptionJson {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}
+export interface PushRegistration {
+  device: string;
+  subscription: PushSubscriptionJson;
+}
+/** Push payload; public/push-sw.js shows it and opens `url` on click. One `tag` per room, so a newer alert replaces an older one. */
+export interface PushNotice {
+  title: string;
+  body: string;
+  url: string;
+  tag: string;
+}
 
 /** WebSocket close codes the server uses. */
 export const CLOSE_REFUSED = 4000;
