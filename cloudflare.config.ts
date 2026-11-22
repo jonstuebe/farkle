@@ -1,4 +1,4 @@
-import { defineConfig, exports } from "cf/config";
+import { bindings, defineConfig, exports } from "cf/config";
 
 import * as entrypoint from "./worker/index.ts" with { type: "cf-worker" };
 
@@ -20,6 +20,13 @@ export default defineConfig({
     // each preview its own storage.
     exports: {
       Room: exports.durableObject({ storage: "sqlite" }),
+    },
+    env: {
+      // Signs turn alerts (Web Push, worker/webPush.ts). Set it once with
+      // `npx cf workers secrets update VAPID_PRIVATE_KEY` (see README, Deploying); locally it
+      // comes from .dev.vars. Without it the Room sends no alerts and everything else still
+      // works. See scripts/vapid.ts.
+      VAPID_PRIVATE_KEY: bindings.secret(),
     },
     assets: {
       notFoundHandling: "single-page-application",

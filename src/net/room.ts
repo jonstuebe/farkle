@@ -15,8 +15,11 @@ import {
   LOBBY_LIFETIME_MS,
   MAX_SEATS,
   MIN_SEATS,
+  REACTION_COOLDOWN_MS,
   cleanPlayerName,
+  isReaction,
   type ClientMessage,
+  type Reaction,
   type Refusal,
   type RoomSummary,
   type RoomView,
@@ -178,6 +181,8 @@ export const isGameOver = (room: PlayingRoom): boolean => snapshotOf(room).statu
  * - `seen`: save; nobody needs telling.
  * - `left`: seat `seat` is gone and the seats after it moved up one. Save, close that seat's
  *   sockets, renumber the others, then send everyone who's left a `room`.
+ * - `reaction`: save nothing. If the sender's socket is past its cooldown (isReactionAllowed),
+ *   send `reaction` to every socket except those of seat `seat` (the sender's device).
  */
 export type Outcome =
   | { kind: "ignored" }
@@ -185,7 +190,8 @@ export type Outcome =
   | { kind: "room"; room: Room }
   | { kind: "appended"; room: PlayingRoom; entries: LogEntry[] }
   | { kind: "seen"; room: PlayingRoom }
-  | { kind: "left"; room: LobbyRoom; seat: number };
+  | { kind: "left"; room: LobbyRoom; seat: number }
+  | { kind: "reaction"; seat: number; reaction: Reaction };
 
 const REJECTED: Outcome = { kind: "rejected" };
 
@@ -213,8 +219,11 @@ export function applyMessage(
       return changed(room, start(room, bySeat));
 
     case "react":
-      // TODO(server worker): relay reactions (coordinator stub so the tree typechecks).
-      return { kind: "ignored" };
+      // Any seated player, in the lobby or the game (also after it ends). Not part of the room:
+      // nothing is stored, and the sender's own screens show it without being told.
+      return isReaction(message.reaction)
+        ? { kind: "reaction", seat: bySeat, reaction: message.reaction }
+        : { kind: "ignored" };
 
     case "leave":
       // The host cancels the room instead, and once the game has started seats are permanent.
@@ -247,6 +256,13 @@ export function applyMessage(
     }
   }
 }
+
+/**
+ * Reactions are limited per socket: one every REACTION_COOLDOWN_MS. `lastAt` is when that socket
+ * last had a reaction relayed (null: never), `now` the current time, both in milliseconds.
+ */
+export const isReactionAllowed = (lastAt: number | null, now: number): boolean =>
+  lastAt === null || now - lastAt >= REACTION_COOLDOWN_MS || now < lastAt;
 
 // ---------------------------------------------------------------------------------------------
 // Validating what a socket sent
@@ -320,6 +336,8 @@ export function parseClientMessage(data: unknown): ClientMessage | null {
       return isCount(value.seq) ? { type: "seen", seq: value.seq } : null;
     case "rematch":
       return isCount(value.gameNumber) ? { type: "rematch", gameNumber: value.gameNumber } : null;
+    case "react":
+      return isReaction(value.reaction) ? { type: "react", reaction: value.reaction } : null;
     default:
       return null;
   }

@@ -7,6 +7,8 @@ import {
   IDLE_GAME_LIFETIME_MS,
   LOBBY_LIFETIME_MS,
   MAX_SEATS,
+  REACTIONS,
+  REACTION_COOLDOWN_MS,
   type ClientMessage,
 } from "./protocol";
 import {
@@ -15,6 +17,7 @@ import {
   configure,
   isDeviceId,
   isGameOver,
+  isReactionAllowed,
   isRoomIntent,
   lifetimeOf,
   parseClientMessage,
@@ -380,6 +383,59 @@ describe("applyMessage: rematch", () => {
   });
 });
 
+describe("applyMessage: react", () => {
+  it("relays a seated player's reaction in the lobby, during a game and after it", () => {
+    expect(applyMessage(lobby(2), 1, { type: "react", reaction: "fire" })).toEqual({
+      kind: "reaction",
+      seat: 1,
+      reaction: "fire",
+    });
+    // Not only on your own turn.
+    expect(applyMessage(playing(3), 2, { type: "react", reaction: "laugh" })).toEqual({
+      kind: "reaction",
+      seat: 2,
+      reaction: "laugh",
+    });
+    expect(applyMessage(finished(), 0, { type: "react", reaction: "clap" })).toEqual({
+      kind: "reaction",
+      seat: 0,
+      reaction: "clap",
+    });
+  });
+
+  it("knows every reaction in the protocol", () => {
+    for (const reaction of REACTIONS) {
+      expect(applyMessage(lobby(1), 0, { type: "react", reaction }).kind).toBe("reaction");
+    }
+  });
+
+  it("ignores a seat that isn't there and a name it doesn't know", () => {
+    expect(applyMessage(lobby(2), 2, { type: "react", reaction: "fire" })).toEqual({ kind: "ignored" });
+    const unknown = { type: "react", reaction: "poop" } as unknown as ClientMessage;
+    expect(applyMessage(lobby(2), 0, unknown)).toEqual({ kind: "ignored" });
+  });
+
+  it("changes nothing in the room", () => {
+    const room = playing(2);
+    const frozen = JSON.stringify(room);
+    applyMessage(room, 0, { type: "react", reaction: "skull" });
+    expect(JSON.stringify(room)).toBe(frozen);
+  });
+});
+
+describe("isReactionAllowed", () => {
+  it("allows a socket's first reaction, then one per cooldown", () => {
+    expect(isReactionAllowed(null, 5_000)).toBe(true);
+    expect(isReactionAllowed(5_000, 5_000)).toBe(false);
+    expect(isReactionAllowed(5_000, 5_000 + REACTION_COOLDOWN_MS - 1)).toBe(false);
+    expect(isReactionAllowed(5_000, 5_000 + REACTION_COOLDOWN_MS)).toBe(true);
+  });
+
+  it("doesn't lock a socket out if the clock steps back", () => {
+    expect(isReactionAllowed(5_000, 4_000)).toBe(true);
+  });
+});
+
 describe("parseClientMessage", () => {
   const parse = (value: unknown) => parseClientMessage(JSON.stringify(value));
 
@@ -396,6 +452,8 @@ describe("parseClientMessage", () => {
       { type: "intent", seq: 4, intent: { type: "passTurn" } },
       { type: "seen", seq: 12 },
       { type: "rematch", gameNumber: 1 },
+      { type: "react", reaction: "thumbsUp" },
+      { type: "react", reaction: "skull" },
     ];
     for (const message of messages) expect(parse(message)).toEqual(message);
   });
@@ -431,6 +489,9 @@ describe("parseClientMessage", () => {
     ["intent without an intent", '{"type":"intent","seq":1}'],
     ["an unknown intent", '{"type":"intent","seq":1,"intent":{"type":"cheat"}}'],
     ["a die that doesn't exist", '{"type":"intent","seq":1,"intent":{"type":"toggleDie","index":6}}'],
+    ["a reaction it doesn't know", '{"type":"react","reaction":"poop"}'],
+    ["an emoji instead of a reaction's name", '{"type":"react","reaction":"🔥"}'],
+    ["a reaction without a name", '{"type":"react"}'],
     ["a toggle without an index", '{"type":"intent","seq":1,"intent":{"type":"toggleDie"}}'],
     ["seen without seq", '{"type":"seen"}'],
     ["rematch without a game number", '{"type":"rematch"}'],

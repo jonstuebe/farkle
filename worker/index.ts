@@ -6,13 +6,18 @@ import {
   CLOSE_EXPIRED,
   CLOSE_REFUSED,
   isRoomCode,
+  VAPID_PUBLIC_KEY,
+  VAPID_SUBJECT,
+  type PushSubscriptionJson,
   type Refusal,
   type ServerMessage,
 } from "../src/net/protocol.ts";
+import { parsePushRegistration, parsePushRemoval, pushesFor } from "../src/net/alerts.ts";
 import {
   applyMessage,
   cancellationOf,
   isDeviceId,
+  isReactionAllowed,
   isRoomIntent,
   lifetimeOf,
   parseClientMessage,
@@ -20,17 +25,24 @@ import {
   presenceOf,
   seatAfterLeave,
   seat,
+  seatOfDevice,
   summaryOf,
   viewOf,
   type LobbyRoom,
   type PlayingRoom,
   type Room as RoomState,
 } from "../src/net/room.ts";
+import { isPushEndpoint, sendPush, type Vapid } from "./webPush.ts";
 
-const ROOM_PATH = /^\/api\/rooms\/([A-Z0-9]+)\/(socket|summary|invite)$/;
+const ROOM_PATH = /^\/api\/rooms\/([A-Z0-9]+)\/(socket|summary|invite|push)$/;
 
 const ROOM_KEY = "room";
 const CODE_KEY = "code";
+// One push subscription per seated device: the latest one that device registered. Kept by
+// device, not by seat number, because seats move up when a guest leaves the lobby.
+const pushKey = (device: string): string => `push:${device}`;
+/** A registration is a few hundred bytes; anything much bigger isn't one. */
+const PUSH_BODY_MAX_LENGTH = 4096;
 
 // The log is kept out of the stored room, one row per entry, so a move writes a row or two
 // instead of rewriting the whole game (and a long game never outgrows one stored value).
@@ -39,11 +51,16 @@ type StoredRoom = LobbyRoom | Omit<PlayingRoom, "log">;
 // Each socket carries its seat, so it survives the Room hibernating.
 interface Attachment {
   seat: number;
+  /** When this socket last had a reaction relayed (ms), for the cooldown. */
+  reactedAt?: number;
 }
 
+const attachmentOf = (socket: WebSocket): Partial<Attachment> =>
+  (socket.deserializeAttachment() as Partial<Attachment> | null) ?? {};
+
 const seatOf = (socket: WebSocket): number | null => {
-  const attachment = socket.deserializeAttachment() as Partial<Attachment> | null;
-  return typeof attachment?.seat === "number" ? attachment.seat : null;
+  const { seat: seatIndex } = attachmentOf(socket);
+  return typeof seatIndex === "number" ? seatIndex : null;
 };
 
 const send = (socket: WebSocket, message: ServerMessage): void => {
@@ -135,6 +152,73 @@ export class Room extends DurableObject<Env> {
     for (const socket of this.ctx.getWebSockets()) this.sendRoom(socket, room);
   }
 
+  // Turn alerts: tells each player the change gives something to do, if their device asked for
+  // alerts and has no open socket (an open socket means the game is on their screen). Without
+  // the VAPID key nothing is sent. Never throws: an alert that fails is just not delivered.
+  private async alert(before: RoomState, after: RoomState): Promise<void> {
+    const privateKey = this.env.VAPID_PRIVATE_KEY;
+    if (!privateKey) return;
+    const vapid: Vapid = { publicKey: VAPID_PUBLIC_KEY, privateKey, subject: VAPID_SUBJECT };
+
+    try {
+      // NOTE: who is connected is read here, before the first await, so it's as of the change.
+      const pushes = pushesFor(before, after, this.code(), this.presence(after));
+      await Promise.all(
+        pushes.map(async ({ seat: seatIndex, notice }) => {
+          const device = after.seats[seatIndex]?.device;
+          const subscription = device && this.ctx.storage.kv.get<PushSubscriptionJson>(pushKey(device));
+          if (!device || !subscription) return;
+          const result = await sendPush(subscription, JSON.stringify(notice), vapid, {
+            salt: crypto.getRandomValues(new Uint8Array(16)),
+            nowSeconds: Math.floor(Date.now() / 1000),
+          });
+          // The device unsubscribed, or the subscription expired. It may have registered a new
+          // one while this was in flight; that one stays.
+          const current = this.ctx.storage.kv.get<PushSubscriptionJson>(pushKey(device));
+          if (result === "Gone" && current?.endpoint === subscription.endpoint) {
+            this.ctx.storage.kv.delete(pushKey(device));
+          }
+        }),
+      );
+    } catch (error) {
+      console.error("Turn alert failed", error);
+    }
+  }
+
+  // POST keeps the device's push subscription (replacing any older one), DELETE forgets it.
+  // Neither is a change to the room, so they don't push its expiry back.
+  private async push(request: Request): Promise<Response> {
+    const text = await request.text();
+    if (text.length > PUSH_BODY_MAX_LENGTH) return new Response("Bad request", { status: 400 });
+    const registration = request.method === "DELETE" ? null : parsePushRegistration(text);
+    const device = registration?.device ?? (request.method === "DELETE" ? parsePushRemoval(text)?.device : undefined);
+    if (!device) return new Response("Bad request", { status: 400 });
+    // Only push services are ever fetched, so the Room can't be used to reach other hosts.
+    if (registration && !isPushEndpoint(registration.subscription.endpoint)) {
+      return new Response("Not a push service", { status: 400 });
+    }
+
+    const room = this.load();
+    if (!room) return new Response("No such room", { status: 404 });
+    if (seatOfDevice(room, device) === null) return new Response("Not seated", { status: 403 });
+
+    if (registration) this.ctx.storage.kv.put(pushKey(device), registration.subscription);
+    else this.ctx.storage.kv.delete(pushKey(device));
+    return new Response(null, { status: 204 });
+  }
+
+  // Passes a reaction to everyone but the sender's own device (which has shown it already).
+  // Reactions aren't part of the room: nothing is saved and the expiry doesn't move.
+  private react(socket: WebSocket, seatIndex: number, message: ServerMessage): void {
+    const now = Date.now();
+    if (!isReactionAllowed(attachmentOf(socket).reactedAt ?? null, now)) return;
+    socket.serializeAttachment({ seat: seatIndex, reactedAt: now } satisfies Attachment);
+    for (const other of this.ctx.getWebSockets()) {
+      const otherSeat = seatOf(other);
+      if (otherSeat !== null && otherSeat !== seatIndex) send(other, message);
+    }
+  }
+
   // Nobody has touched the room for its whole lifetime.
   override async alarm(): Promise<void> {
     await this.end(CLOSE_EXPIRED, "Expired");
@@ -177,6 +261,7 @@ export class Room extends DurableObject<Env> {
     const [, code = "", route] = ROOM_PATH.exec(url.pathname) ?? [];
     const device = url.searchParams.get("device") ?? "";
 
+    if (route === "push") return this.push(request);
     if (route === "summary") return json(summaryOf(this.load(), device));
     if (route === "invite") return this.cancel(device);
 
@@ -227,16 +312,25 @@ export class Room extends DurableObject<Env> {
       case "room":
         await this.save(outcome.room);
         this.broadcastRoom(outcome.room);
+        // The game starting, or a rematch.
+        this.ctx.waitUntil(this.alert(room, outcome.room));
         return;
       case "appended":
         await this.save(outcome.room, outcome.entries);
         this.broadcast({ type: "appended", gameNumber: outcome.room.gameNumber, entries: outcome.entries });
+        // The turn passing, or the game ending.
+        this.ctx.waitUntil(this.alert(room, outcome.room));
+        return;
+      case "reaction":
+        this.react(socket, seatIndex, { type: "reaction", seat: outcome.seat, reaction: outcome.reaction });
         return;
       case "seen":
         await this.save(outcome.room);
         return;
       case "left":
         await this.save(outcome.room);
+        // The leaver's device gets no more alerts from this room.
+        this.ctx.storage.kv.delete(pushKey(room.seats[outcome.seat]?.device ?? ""));
         for (const other of this.ctx.getWebSockets()) {
           const before = seatOf(other);
           if (before === null) continue;
@@ -251,7 +345,7 @@ export class Room extends DurableObject<Env> {
               // Already closed.
             }
           } else if (after !== before) {
-            other.serializeAttachment({ seat: after } satisfies Attachment);
+            other.serializeAttachment({ ...attachmentOf(other), seat: after } satisfies Attachment);
           }
         }
         this.broadcastRoom(outcome.room);
@@ -293,7 +387,11 @@ export default {
     if (route === "socket" && request.headers.get("Upgrade") !== "websocket") {
       return new Response("Expected a WebSocket", { status: 426 });
     }
-    if (route !== "socket" && !isDeviceId(url.searchParams.get("device") ?? "")) {
+    if (route === "push" && request.method !== "POST" && request.method !== "DELETE") {
+      return new Response("Method not allowed", { status: 405 });
+    }
+    // The push routes name the device in the body; the Room checks it there.
+    if (route !== "socket" && route !== "push" && !isDeviceId(url.searchParams.get("device") ?? "")) {
       return new Response("Bad request", { status: 400 });
     }
 

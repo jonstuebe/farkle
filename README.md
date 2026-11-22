@@ -32,7 +32,25 @@ A game is its starting input plus an append-only log of moves (`src/game/log.ts`
 
 Rooms delete themselves when nobody touches them: a lobby after 7 days, a game in progress after 30, a finished game after 7.
 
-`bun run smoke` plays through all of this over real WebSockets: a host and two guests, rules, turns, moves that must be refused, a disconnect and reconnect, a game to the end, a rematch, cancelling a lobby, a guest leaving a lobby and a full lobby. It needs `bun dev` running, and takes the server's address if it isn't the default:
+### Reactions
+
+Players can send a quick emoji (one of eight in `REACTIONS`, sent by name, never as free text) in the lobby or during a game. The Room passes it to every other device in the room and to nobody else; it isn't stored, replayed, or counted in the log, and each socket can send at most one a second (faster ones are dropped).
+
+### Turn alerts
+
+A player who turns on alerts gets a Web Push notification when the game needs them and isn't open on their device: their turn comes up (`Ada banked 450. It's your turn.`), the final round reaches them (`Ada reached 10,250. Last turn!`), a game or rematch starts with them, or the game ends (`Ada wins with 10,250.`). Nothing is sent for each roll, and nothing to a device with the game open.
+
+- The browser subscribes and POSTs `{device, subscription}` to `/api/rooms/:code/push` for each game it's seated in; DELETE with `{device}` turns them off. One subscription per device, the newest wins.
+- `src/net/alerts.ts` decides who to tell and what it says (tested in `alerts.test.ts`). `worker/webPush.ts` sends it: the payload encrypted for the device (RFC 8291) and signed with the app's VAPID key (RFC 8292), with nothing but WebCrypto. It only ever posts to the browsers' push services (or localhost, for the smoke test). A subscription the push service says is gone (404/410) is deleted.
+- The VAPID public key is in `src/net/protocol.ts`; the private key is the Worker secret `VAPID_PRIVATE_KEY`. `bun dev` reads it from `.dev.vars` (git-ignored):
+
+  ```bash
+  VAPID_PRIVATE_KEY=...   # .dev.vars
+  ```
+
+  Without it, everything works except that no alerts are sent. `bun scripts/vapid.ts` makes a new pair, but replacing the pair cuts off every device that already subscribed.
+
+`bun run smoke` plays through all of this over real WebSockets: a host and two guests, rules, turns, moves that must be refused, a disconnect and reconnect, a game to the end, a rematch, cancelling a lobby, a guest leaving a lobby, a full lobby, reactions, and turn alerts (registration, and a push delivered to a stand-in push service the script runs on localhost, which checks the VAPID signature and decrypts it). It needs `bun dev` running, and takes the server's address if it isn't the default:
 
 ```bash
 bun run smoke http://localhost:5174
@@ -45,6 +63,13 @@ When a room is cancelled or expires, the Room sends `refused` and then closes th
 The site runs on Cloudflare Workers, deployed with the [`cf` CLI](https://developers.cloudflare.com/cf/). The Worker is set up in `cloudflare.config.ts`. There's no custom domain yet, so production is on the Worker's `workers.dev` URL.
 
 - **By hand:** run `npx cf auth login` once, then `bun run deploy`.
+- **Turn alerts:** once the Worker exists (after the first deploy), store the VAPID private key (the value in `.dev.vars`) as a Worker secret:
+
+  ```bash
+  npx cf workers secrets update VAPID_PRIVATE_KEY --worker farkle --type secret_text --text "$(grep VAPID_PRIVATE_KEY .dev.vars | cut -d= -f2-)"
+  ```
+
+  (The `cf` CLI has no `secret put`; this is its equivalent.) Also set `VAPID_SUBJECT` in `src/net/protocol.ts` to the site's real URL.
 - **Previews:** `npx cf previews deploy` puts up a Worker Preview with its own `workers.dev` URL and its own rooms. Production isn't affected.
 
 To deploy on every push, connect the repo in Workers Builds (dashboard → Workers & Pages → farkle → Settings → Builds):

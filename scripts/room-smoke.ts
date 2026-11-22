@@ -7,17 +7,24 @@
  *
  * Covers: host opens a room, guests join, rules, start, turns with seq, a stale seq, a move out
  * of turn, malformed messages, disconnect + reconnect, seen marks, summaries, a whole game to
- * the end, rematch, cancelling a lobby, leaving a lobby, a full lobby, and the HTTP error cases.
+ * the end, rematch, cancelling a lobby, leaving a lobby, a full lobby, reactions, turn alerts
+ * (Web Push, delivered to a stand-in push service this script runs), and the HTTP error cases.
  * Every room uses a fresh random code, so it is safe to run again and again.
  */
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { replayLog, type GameSnapshot, type Intent } from "../src/game/log.ts";
 import { selectionScore } from "../src/game/machine.ts";
 import {
   CLOSE_CANCELLED,
   CLOSE_REFUSED,
   MAX_SEATS,
+  REACTION_COOLDOWN_MS,
+  VAPID_PUBLIC_KEY,
+  VAPID_SUBJECT,
   newRoomCode,
   type ClientMessage,
+  type PushNotice,
   type RoomSummary,
   type RoomView,
   type ServerMessage,
@@ -207,6 +214,254 @@ async function takeTurn(clients: Client[]): Promise<void> {
 }
 
 // -----------------------------------------------------------------------------------------------
+// A stand-in push service on localhost, and each test subscription's endpoint
+// points at it. It keeps every request it gets and answers 201, or 410 for /gone/*.
+// -----------------------------------------------------------------------------------------------
+
+interface Delivery {
+  path: string;
+  headers: Headers;
+  body: Uint8Array<ArrayBuffer>;
+}
+
+const deliveries: Delivery[] = [];
+const pushServer = createServer((request, response) => {
+  const chunks: Buffer[] = [];
+  request.on("data", (chunk: Buffer) => chunks.push(chunk));
+  request.on("end", () => {
+    const path = new URL(request.url ?? "/", "http://localhost").pathname;
+    const headers = new Headers();
+    for (const [name, value] of Object.entries(request.headers)) if (typeof value === "string") headers.set(name, value);
+    deliveries.push({ path, headers, body: new Uint8Array(Buffer.concat(chunks)) });
+    response.writeHead(path.startsWith("/gone/") ? 410 : 201).end();
+  });
+});
+await new Promise<void>((resolve) => pushServer.listen(0, "127.0.0.1", resolve));
+const pushService = { port: (pushServer.address() as AddressInfo).port };
+
+const fromBase64Url = (value: string) => Uint8Array.from(Buffer.from(value, "base64url"));
+const toBase64Url = (bytes: ArrayBuffer | Uint8Array) => Buffer.from(bytes as ArrayBuffer).toString("base64url");
+
+/** A device's side of a push subscription: the keys the browser would make, and its endpoint. */
+async function testSubscription(path: string) {
+  const keys = (await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"])) as CryptoKeyPair;
+  const auth = crypto.getRandomValues(new Uint8Array(16));
+  const p256dh = toBase64Url(await crypto.subtle.exportKey("raw", keys.publicKey));
+  return {
+    keys,
+    auth,
+    json: { endpoint: `http://127.0.0.1:${pushService.port}${path}`, keys: { p256dh, auth: toBase64Url(auth) } },
+  };
+}
+type TestSubscription = Awaited<ReturnType<typeof testSubscription>>;
+
+const hkdf = async (salt: Uint8Array<ArrayBuffer>, ikm: Uint8Array<ArrayBuffer>, info: Uint8Array<ArrayBuffer>, length: number) => {
+  const key = await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt, info }, key, length * 8));
+};
+
+/** Decrypts an aes128gcm push body (RFC 8291) the way the browser would. */
+async function decryptPush(body: Uint8Array<ArrayBuffer>, { keys, auth }: TestSubscription): Promise<string> {
+  const encoder = new TextEncoder();
+  const salt = body.slice(0, 16);
+  const keyLength = body[20] ?? 0;
+  const serverPublic = body.slice(21, 21 + keyLength);
+  const userAgentPublic = new Uint8Array(await crypto.subtle.exportKey("raw", keys.publicKey));
+  const serverKey = await crypto.subtle.importKey("raw", serverPublic, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const shared = new Uint8Array(await crypto.subtle.deriveBits({ name: "ECDH", public: serverKey }, keys.privateKey, 256));
+  const info = new Uint8Array([...encoder.encode("WebPush: info\0"), ...userAgentPublic, ...serverPublic]);
+  const ikm = await hkdf(auth, shared, info, 32);
+  const contentKey = await hkdf(salt, ikm, encoder.encode("Content-Encoding: aes128gcm\0"), 16);
+  const nonce = await hkdf(salt, ikm, encoder.encode("Content-Encoding: nonce\0"), 12);
+  const aesKey = await crypto.subtle.importKey("raw", contentKey, "AES-GCM", false, ["decrypt"]);
+  const plain = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce }, aesKey, body.slice(21 + keyLength)));
+  if (plain.at(-1) !== 2) throw new Error("FAILED: the push isn't a single final record");
+  return new TextDecoder().decode(plain.slice(0, -1));
+}
+
+/** True if `authorization` is `vapid t=<JWT>, k=<our public key>` with a valid ES256 signature for `audience`. */
+async function isVapidFor(authorization: string, audience: string): Promise<boolean> {
+  const match = /^vapid t=([^.]+)\.([^.]+)\.([^,]+), k=(.+)$/.exec(authorization);
+  if (!match) return false;
+  const [, head = "", claims = "", signature = "", k] = match;
+  if (k !== VAPID_PUBLIC_KEY) return false;
+  const payload = JSON.parse(Buffer.from(claims, "base64url").toString()) as { aud: string; sub: string; exp: number };
+  if (payload.aud !== audience || payload.sub !== VAPID_SUBJECT || payload.exp * 1000 < Date.now()) return false;
+  const key = await crypto.subtle.importKey("raw", fromBase64Url(VAPID_PUBLIC_KEY), { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+  return crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, fromBase64Url(signature), new TextEncoder().encode(`${head}.${claims}`));
+}
+
+/** Waits for a delivery to `path` after `from`, or null if none comes in `ms`. */
+async function delivery(path: string, from: number, ms = TIMEOUT_MS): Promise<Delivery | null> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const found = deliveries.slice(from).find((d) => d.path === path);
+    if (found || Date.now() > deadline) return found ?? null;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+const pushRoute = (code: string, method: "POST" | "DELETE", body: unknown) =>
+  fetch(`${base}/api/rooms/${code}/push`, { method, body: typeof body === "string" ? body : JSON.stringify(body) });
+
+async function reactions(): Promise<void> {
+  console.log("\nReactions");
+  const code = newRoomCode();
+  const host = await connect("host", code, newDevice(), "Ada", "host");
+  const guestId = newDevice();
+  const guest = await connect("guest", code, guestId, "Bo", "join");
+  const guestTab = await connect("guest's other tab", code, guestId, null, "join");
+  const third = await connect("third", code, newDevice(), "Cy", "join");
+  await host.until(() => host.room?.seats.length === 3, "three seats");
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  const marks = () => [host, guest, guestTab, third].map((c) => c.inbox.length);
+  let from = marks();
+  guest.send({ type: "react", reaction: "fire" });
+  const toHost = await host.next("reaction", from[0]);
+  const toThird = await third.next("reaction", from[3]);
+  check(same(toHost, { type: "reaction", seat: 1, reaction: "fire" }) && same(toHost, toThird), "a lobby reaction reaches the others, with the sender's seat");
+  await guest.quiet("their own reaction");
+  check(guestTab.inbox.length === from[2], "...nor does the sender's other tab (same device)");
+
+  from = marks();
+  guest.send({ type: "react", reaction: "laugh" });
+  await host.quiet(`a second reaction within ${REACTION_COOLDOWN_MS} ms`);
+  host.send(JSON.stringify({ type: "react", reaction: "poop" }));
+  host.send(JSON.stringify({ type: "react", reaction: "🔥" }));
+  await third.quiet("unknown reaction names");
+  await new Promise((resolve) => setTimeout(resolve, REACTION_COOLDOWN_MS));
+  from = marks();
+  guest.send({ type: "react", reaction: "clap" });
+  check(same(await host.next("reaction", from[0]), { type: "reaction", seat: 1, reaction: "clap" }), "after the cooldown the next one goes through");
+  check(host.inbox.slice(from[0]).every((m) => m.type === "reaction"), "...and nothing else is sent (no room, no presence)");
+
+  host.send({ type: "start" });
+  await Promise.all([host, guest, third].map((c) => c.until(() => c.room?.phase === "playing", "the game")));
+  host.send({ type: "intent", seq: 0, intent: { type: "roll" } });
+  await inSync([host, guest, third], 2);
+  from = marks();
+  third.send({ type: "react", reaction: "wow" });
+  check(same(await guest.next("reaction", from[1]), { type: "reaction", seat: 2, reaction: "wow" }), "in a game anyone can react, not only the player whose turn it is");
+  await guestTab.next("reaction", from[2]);
+  check(true, "...and every socket of the other devices hears it");
+  host.send({ type: "intent", seq: 2, intent: { type: "toggleDie", index: 0 } });
+  await host.until(() => host.inbox.slice(from[0]).some((m) => m.type === "appended" || m.type === "room"), "the next move");
+  check(host.inbox.slice(from[0]).some((m) => m.type === "appended" && m.entries[0]?.seq === 2), "a reaction doesn't use up a log seq (the next move at seq 2 goes through)");
+  check(host.playing.log.every((e, i) => e.seq === i), "...and isn't stored in the log");
+  const reconnect = await connect("third again", code, third.device, null, "join");
+  check(reconnect.inbox.every((m) => m.type !== "reaction"), "reactions aren't replayed to a reconnect");
+
+  // Unseated sockets: a guest that left a lobby keeps a socket for a moment, and a device that
+  // was refused never gets one.
+  const lobbyCode = newRoomCode();
+  const lobbyHost = await connect("lobby host", lobbyCode, newDevice(), "Ada", "host");
+  const leaverId = newDevice();
+  const leaver = await connect("leaver", lobbyCode, leaverId, "Bo", "join");
+  const leaverTab = await connect("leaver's other tab", lobbyCode, leaverId, null, "join");
+  await lobbyHost.until(() => lobbyHost.room?.seats.length === 2, "two seats");
+  leaver.send({ type: "leave" });
+  await lobbyHost.until(() => lobbyHost.room?.seats.length === 1, "the leave");
+  const hostFrom = lobbyHost.inbox.length;
+  leaverTab.send({ type: "react", reaction: "skull" });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  check(lobbyHost.inbox.slice(hostFrom).every((m) => m.type !== "reaction"), "a device without a seat can't react");
+  const late = await connect("late", code, newDevice(), "Late", "join");
+  await late.until(() => late.closed !== null, "close");
+  check(late.inbox.length === 1 && late.inbox[0]?.type === "refused", "a stranger to a started game is refused before it could react");
+
+  await Promise.all([host, guest, guestTab, third, reconnect, lobbyHost, leaverTab].map((c) => c.close().catch(() => {})));
+}
+
+async function turnAlerts(): Promise<void> {
+  console.log("\nTurn alerts");
+  const code = newRoomCode();
+  const hostId = newDevice();
+  const guestId = newDevice();
+  const hostSub = await testSubscription(`/push/${code}/host`);
+  const guestSub = await testSubscription(`/push/${code}/guest`);
+
+  check((await pushRoute(code, "POST", { device: hostId, subscription: hostSub.json })).status === 404, "registering for a room nobody made is 404");
+  const host = await connect("host", code, hostId, "Ada", "host");
+  const guest = await connect("guest", code, guestId, "Bo", "join");
+  await host.until(() => host.room?.seats.length === 2, "two seats");
+
+  check((await pushRoute(code, "POST", "not json")).status === 400, "a body that isn't JSON is 400");
+  check((await pushRoute(code, "POST", { device: guestId })).status === 400, "a registration without a subscription is 400");
+  check((await pushRoute(code, "POST", { device: "short", subscription: guestSub.json })).status === 400, "a short device id is 400");
+  check(
+    (await pushRoute(code, "POST", { device: guestId, subscription: { ...guestSub.json, endpoint: "https://example.com/push" } })).status === 400,
+    "an endpoint that isn't a push service is 400",
+  );
+  check((await pushRoute(code, "POST", { device: newDevice(), subscription: guestSub.json })).status === 403, "a device without a seat is 403");
+  check((await pushRoute(code, "DELETE", { device: newDevice() })).status === 403, "...for DELETE too");
+  check((await fetch(`${base}/api/rooms/${code}/push`)).status === 405, "GET push is 405");
+  check((await pushRoute(code, "POST", { device: hostId, subscription: hostSub.json })).status === 204, "the host registers (204)");
+  const old = await testSubscription(`/push/${code}/old`);
+  check((await pushRoute(code, "POST", { device: guestId, subscription: old.json })).status === 204, "the guest registers (204)");
+  check((await pushRoute(code, "POST", { device: guestId, subscription: guestSub.json })).status === 204, "...and again from a newer subscription, which replaces it");
+
+  // A target nobody reaches in a few turns.
+  host.send({ type: "configure", rules: { targetScore: 100_000 } });
+  await guest.until(() => guest.room?.phase === "lobby" && guest.room.rules.targetScore === 100_000, "new rules");
+  let from = deliveries.length;
+  host.send({ type: "start" });
+  await Promise.all([host, guest].map((c) => c.until(() => c.room?.phase === "playing", "the game")));
+  check((await delivery(`/push/${code}/host`, from, 600)) === null, "no alert for the host's first turn: their game is open");
+
+  // The guest closes the game; the host plays a turn, and the turn passes to the guest.
+  await guest.close();
+  await host.until(() => host.presence[1] === false, "the guest to disconnect");
+  from = deliveries.length;
+  await takeTurn([host]);
+  const sent = await delivery(`/push/${code}/guest`, from);
+  check(sent !== null, "the turn passes to a disconnected guest: a push arrives at their endpoint");
+  check(deliveries.slice(from).every((d) => d.path !== `/push/${code}/old`), "...only at their newest subscription");
+  check(sent.headers.get("content-encoding") === "aes128gcm" && sent.headers.get("ttl") !== null, "...encrypted (aes128gcm), with a TTL");
+  check(await isVapidFor(sent.headers.get("authorization") ?? "", `http://127.0.0.1:${pushService.port}`), "...signed: vapid t=<ES256 JWT for the push service>, k=<our public key>");
+  const notice = JSON.parse(await decryptPush(sent.body, guestSub)) as PushNotice;
+  check(
+    notice.title === "Your turn" && /^Ada (banked [\d,]+|farkled)\. It's your turn\.$/.test(notice.body) && notice.url === `/r/${code}` && notice.tag === `farkle-${code}`,
+    `...and the guest's key decrypts it: "${notice.body}"`,
+  );
+  check(deliveries.slice(from).filter((d) => d.path === `/push/${code}/guest`).length === 1, "one alert for the whole turn, not one per roll");
+
+  // Back in the game: the guest plays while the host has it open, so the host gets nothing.
+  const back = await connect("guest again", code, guestId, null, "join");
+  from = deliveries.length;
+  await takeTurn([host, back]);
+  check(host.snapshot().context.current === 0, "the turn passes back to the host");
+  check((await delivery(`/push/${code}/host`, from, 600)) === null, "no push to a connected seat");
+
+  // Turned off: no more alerts.
+  check((await pushRoute(code, "DELETE", "{}")).status === 400, "DELETE without a device is 400");
+  check((await pushRoute(code, "DELETE", { device: guestId })).status === 204, "the guest turns alerts off (204)");
+  await back.close();
+  await host.until(() => host.presence[1] === false, "the guest to disconnect");
+  from = deliveries.length;
+  await takeTurn([host]);
+  check((await delivery(`/push/${code}/guest`, from, 600)) === null, "after DELETE the guest gets no alert");
+
+  // A subscription the push service says is gone (410) is forgotten after one try.
+  const gone = await testSubscription(`/gone/${code}`);
+  check((await pushRoute(code, "POST", { device: guestId, subscription: gone.json })).status === 204, "the guest registers a subscription that has expired");
+  const again = await connect("guest once more", code, guestId, null, "join");
+  await takeTurn([host, again]);
+  await again.close();
+  await host.until(() => host.presence[1] === false, "the guest to disconnect");
+  from = deliveries.length;
+  await takeTurn([host]);
+  check((await delivery(`/gone/${code}`, from)) !== null, "the push service answers 410");
+  const last = await connect("guest last time", code, guestId, null, "join");
+  await takeTurn([host, last]);
+  await last.close();
+  await host.until(() => host.presence[1] === false, "the guest to disconnect");
+  from = deliveries.length;
+  await takeTurn([host]);
+  check((await delivery(`/gone/${code}`, from, 600)) === null, "...so the Room drops that subscription and doesn't try again");
+
+  await host.close();
+}
 
 async function main() {
   console.log(`Room smoke test against ${base}\n`);
@@ -487,6 +742,9 @@ async function main() {
   check(crowd[7]!.playing.input.players.length === MAX_SEATS, `an ${MAX_SEATS}-player game starts`);
   await Promise.all([...crowd, second8].map((c) => c.close()));
 
+  await reactions();
+  await turnAlerts();
+
   console.log("\nHTTP");
   const status = async (path: string, init?: RequestInit) => (await fetch(`${base}${path}`, init)).status;
   check((await status(`/api/rooms/abc/summary?device=${hostId}`)) === 404, "a bad code is 404");
@@ -502,7 +760,10 @@ async function main() {
 }
 
 main().then(
-  () => process.exit(0),
+  () => {
+    pushServer.close();
+    process.exit(0);
+  },
   (error: unknown) => {
     console.error(`\n${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
