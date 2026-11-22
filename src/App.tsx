@@ -3,6 +3,7 @@ import type { GameInput } from "./game/machine";
 import { clearSavedGame, loadSavedGame, persistSession, summarizeSavedGame, type SavedGame } from "./game/persistence";
 import { AppActionsContext, GameProvider, type AppActions } from "./game/react";
 import { createLocalSession, type GameSession } from "./game/session";
+import { replayLog } from "./game/log";
 import { Presenter } from "./game/presenter";
 import { getDeviceId, getPlayerName, setPlayerName } from "./net/device";
 import { newRoomCode } from "./net/protocol";
@@ -20,6 +21,30 @@ const loadScene = () => import("./scene/GameCanvas");
 const GameCanvas = lazy(() => loadScene().then((m) => ({ default: m.GameCanvas })));
 
 /**
+ * The scene dispatches this on `window` once Rapier's WASM is initialised and the tray has
+ * rendered. <Physics> suspends inside the canvas, where the Suspense below can't see it, so
+ * without the event the loading screen went away before the table could be drawn.
+ */
+// Same string as SCENE_READY_EVENT in scene/DiceSet.tsx (not imported: that would pull three into this chunk).
+const SCENE_READY_EVENT = "farkle:scene-ready";
+/** Never keep the player on the loading screen forever if the event doesn't come. */
+const SCENE_READY_TIMEOUT_MS = 8000;
+
+function useSceneReady(): boolean {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const done = () => setReady(true);
+    window.addEventListener(SCENE_READY_EVENT, done);
+    const timer = setTimeout(done, SCENE_READY_TIMEOUT_MS);
+    return () => {
+      window.removeEventListener(SCENE_READY_EVENT, done);
+      clearTimeout(timer);
+    };
+  }, []);
+  return ready;
+}
+
+/**
  * Screens, by route (see ./net/routes.ts):
  *   /          home, and under it (history state) local play and the join form
  *   /r/CODE    an online room: naming (first time), lobby, then the game
@@ -35,7 +60,7 @@ export function App() {
   const [editingName, setEditingName] = useState(false);
   // Read again whenever home is shown, so a local game played since then is offered.
   const localGame = useMemo(() => {
-    const saved = route.kind === "home" ? loadSavedGame() : null;
+    const saved = route.kind === "home" ? resumableGame() : null;
     return saved ? summarizeSavedGame(saved) : null;
   }, [route]);
 
@@ -128,6 +153,20 @@ export function App() {
 // Local pass-and-play: setup screen, then the game (saved in localStorage as it goes)
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * The saved local game, if it is worth offering back: unfinished (persistence only keeps those)
+ * and with at least one move. A game nobody has rolled in yet is just its settings, and offering
+ * to "resume" it after the player chose New game reads as if their game hadn't ended.
+ */
+function resumableGame(): SavedGame | null {
+  const saved = loadSavedGame();
+  if (saved && saved.log.length === 0) {
+    clearSavedGame();
+    return null;
+  }
+  return saved;
+}
+
 type LocalScreen =
   | { kind: "setup" }
   | { kind: "playing"; input: GameInput; session: GameSession; presenter: Presenter; gameId: number };
@@ -136,7 +175,7 @@ let nextGameId = 1;
 
 function LocalPlay({ onHome }: { onHome: () => void }) {
   const [screen, setScreen] = useState<LocalScreen>({ kind: "setup" });
-  const [saved, setSaved] = useState<SavedGame | null>(() => loadSavedGame());
+  const [saved, setSaved] = useState<SavedGame | null>(() => resumableGame());
 
   // Session + presenter are created in event handlers (never during render, so StrictMode can't
   // double them) and the previous game's presenter is stopped when the screen changes.
@@ -178,7 +217,7 @@ function LocalPlay({ onHome }: { onHome: () => void }) {
   );
 
   const resume = useCallback(() => {
-    const game = loadSavedGame();
+    const game = resumableGame();
     if (!game) {
       clearSavedGame();
       setSaved(null);
@@ -188,8 +227,15 @@ function LocalPlay({ onHome }: { onHome: () => void }) {
   }, [open]);
 
   const newGame = useCallback(() => {
-    // A game that is still running was saved on its last change; offer it back on the setup screen.
-    setSaved(loadSavedGame());
+    // A game that is still running was saved on its last change; offer it back on the setup
+    // screen. One that is over (New game from the game-over screen) is never offered, even if a
+    // stale save of it is somehow still around.
+    const previous = current.current;
+    if (previous.kind === "playing") {
+      const { input, log } = previous.session.getState();
+      if (replayLog(input, log).status !== "active") clearSavedGame();
+    }
+    setSaved(resumableGame());
     show({ kind: "setup" });
   }, [show]);
 
@@ -223,6 +269,7 @@ interface GameViewProps {
 }
 
 function GameView({ session, presenter, actions }: GameViewProps) {
+  const sceneReady = useSceneReady();
   // Mirror a local game into localStorage for as long as this view is mounted.
   useEffect(() => (session.kind === "local" ? persistSession(session) : undefined), [session]);
 
@@ -233,7 +280,7 @@ function GameView({ session, presenter, actions }: GameViewProps) {
           <Suspense fallback={<LoadingScreen />}>
             <GameCanvas />
             <Hud onNewGame={actions.newGame} />
-            <div className="app-curtain" aria-hidden="true" />
+            {sceneReady ? <div className="app-curtain" aria-hidden="true" /> : <LoadingScreen />}
           </Suspense>
         </div>
       </GameProvider>
