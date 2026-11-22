@@ -10,7 +10,9 @@ const LANE_Z = TRAY_DEPTH / 2 - KEEP_LANE_DEPTH / 2;
 /**
  * Faint chalk lines on the felt of the kept-dice lane, one in each gap between two keeps,
  * so dice kept from different rolls read as separate sets. They fade in, and slide along
- * with the dice when the row re-centres.
+ * with the dice when the row re-centres. Hidden marks stay in the scene at zero opacity
+ * (five tiny quads) so their shader compiles with the first frame, not mid-throw when
+ * the first divider shows up.
  */
 export function KeptLaneMarks({ dividers }: { dividers: readonly number[] }) {
   const meshes = useRef<(Mesh | null)[]>([]);
@@ -47,7 +49,6 @@ export function KeptLaneMarks({ dividers }: { dividers: readonly number[] }) {
       }
       material.opacity += (goal - material.opacity) * (1 - Math.exp(-delta * (goal > 0 ? 5 : 14)));
       if (Math.abs(material.opacity - goal) < 0.005) material.opacity = goal;
-      mesh.visible = material.opacity > 0;
     });
   });
 
@@ -63,7 +64,6 @@ export function KeptLaneMarks({ dividers }: { dividers: readonly number[] }) {
           material={materials[n]}
           rotation={[-Math.PI / 2, 0, 0]}
           position={[0, 0.006, LANE_Z]}
-          visible={false}
           raycast={noRaycast}
         />
       ))}

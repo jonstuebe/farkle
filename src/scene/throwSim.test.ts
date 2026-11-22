@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import RAPIER from "@dimforge/rapier3d-compat";
+import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 import { Quaternion, Vector3 } from "three";
 import { DIE_SIZE, topFace, topFaceAlignment, type DieValue } from "./dice";
 import { COCKED_ALIGNMENT, REST_Y } from "./diceLayout";
@@ -7,11 +8,30 @@ import { MAX_FLIGHT_SECONDS, planThrow, POSE_SIZE, samplePlan, SIM_STEP, simulat
 import { PLAY_MAX_Z, PLAY_MIN_Z, TRAY_WIDTH } from "./tray";
 
 const lcg = (seed: number) => () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
-// SAFETY: the scene gets this same module from useRapier(); the package is the one @react-three/rapier wraps.
-const rapier = RAPIER as unknown as RapierModule;
+/**
+ * The Rapier build @react-three/rapier itself depends on, resolved from that package's own
+ * folder: the scene gets exactly this module from useRapier(). A bare
+ * "@dimforge/rapier3d-compat" import would find whatever copy is hoisted to the top of
+ * node_modules (another package pulls in an older one), and test a different engine.
+ */
+const fromR3R = createRequire(createRequire(import.meta.url).resolve("@react-three/rapier"));
+const rapierPath = fromR3R.resolve("@dimforge/rapier3d-compat");
+let rapier: RapierModule;
 
 beforeAll(async () => {
-  await RAPIER.init();
+  const module = (await import(/* @vite-ignore */ rapierPath)) as { default?: unknown };
+  // SAFETY: this is the package @react-three/rapier wraps, so it has the type useRapier() reports.
+  rapier = (module.default ?? module) as RapierModule;
+  await (rapier as unknown as { init(): Promise<void> }).init();
+});
+
+describe("physics engine", () => {
+  it("is the Rapier build @react-three/rapier uses", () => {
+    const wanted = JSON.parse(readFileSync(fromR3R.resolve("@react-three/rapier/package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    expect(rapier.version()).toBe(wanted.dependencies["@dimforge/rapier3d-compat"]);
+  });
 });
 
 const finalPose = (poses: Float32Array, steps: number) => {

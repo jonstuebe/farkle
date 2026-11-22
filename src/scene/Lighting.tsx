@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import {
   BackSide,
@@ -210,19 +210,58 @@ function startingTier(): number {
 }
 
 /**
+ * The pixel-ratio cap of the current tier, for <Canvas dpr>. <Canvas> re-applies its dpr prop
+ * every time it renders (and it renders on every resize), so the cap has to live in that
+ * prop: setting the ratio from inside would be undone by the next render, costing two
+ * drawing-buffer reallocations and up to a second at the wrong resolution.
+ */
+const dprCap = (() => {
+  let tier: number | null = null;
+  const listeners = new Set<() => void>();
+  return {
+    /** Starting tier: a `?quality=` override, else by device. */
+    initialTier(): number {
+      const override = typeof window === "undefined" ? null : parseQualityOverride(window.location.search);
+      return override ?? startingTier();
+    },
+    get(): number {
+      tier ??= this.initialTier();
+      return (QUALITY_TIERS[tier] ?? QUALITY_TIERS[0]!).maxDpr;
+    },
+    set(next: number) {
+      if (next === tier) return;
+      tier = next;
+      listeners.forEach((listener) => listener());
+    },
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+  };
+})();
+
+/** `dpr` for <Canvas>: a range, so R3F still follows the display (zoom, another screen) below the cap. */
+export function useQualityDpr(): [number, number] {
+  const cap = useSyncExternalStore(
+    (listener) => dprCap.subscribe(listener),
+    () => dprCap.get(),
+    () => dprCap.get(),
+  );
+  return [1, cap];
+}
+
+/**
  * Watches frame times and trades resolution / shadow detail for smoothness.
  * Calls `onShadowMapSize` when the key light's shadow map should be reallocated.
  */
 function AdaptiveQuality({ onShadowMapSize }: { onShadowMapSize: (size: number) => void }) {
   const gl = useThree((state) => state.gl);
-  const setDpr = useThree((state) => state.setDpr);
-  const get = useThree((state) => state.get);
 
   const control = useRef<{ state: QualityState; pinned: boolean; frames: ReturnType<typeof createFrameWindow> } | null>(null);
   if (control.current === null) {
     const override = typeof window === "undefined" ? null : parseQualityOverride(window.location.search);
     control.current = {
-      state: initialQuality(override ?? startingTier()),
+      state: initialQuality(override ?? dprCap.initialTier()),
       pinned: override !== null,
       frames: createFrameWindow(),
     };
@@ -230,10 +269,7 @@ function AdaptiveQuality({ onShadowMapSize }: { onShadowMapSize: (size: number) 
 
   const apply = (tierIndex: number) => {
     const tier = QUALITY_TIERS[tierIndex] ?? QUALITY_TIERS[0]!;
-    const device = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
-    const dpr = Math.max(1, Math.min(device, tier.maxDpr));
-    // <Canvas> re-applies its own dpr prop whenever it re-renders, so this is re-checked each window.
-    if (Math.abs(get().viewport.dpr - dpr) > 1e-3) setDpr(dpr);
+    dprCap.set(tierIndex);
     onShadowMapSize(tier.shadowMapSize);
     gl.domElement.dataset.quality = tier.name;
   };

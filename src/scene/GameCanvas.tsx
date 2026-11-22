@@ -3,16 +3,17 @@ import { Physics } from "@react-three/rapier";
 import { ACESFilmicToneMapping, SRGBColorSpace } from "three";
 import { Table } from "./Table";
 import { DiceSet } from "./DiceSet";
-import { Lighting } from "./Lighting";
+import { Lighting, useQualityDpr } from "./Lighting";
 import { CameraRig } from "./CameraRig";
 import { GRAVITY } from "./tray";
 
 /** The 3D game view: the tray, lighting, and the dice driven by the game machine. */
 export function GameCanvas() {
+  const dpr = useQualityDpr();
   return (
     <Canvas
       shadows="percentage"
-      dpr={[1, 2]}
+      dpr={dpr}
       camera={{ position: [0, 11, 7.5], fov: 40, near: 0.5, far: 200 }}
       gl={{ antialias: true, powerPreference: "high-performance" }}
       onCreated={({ gl }) => {
