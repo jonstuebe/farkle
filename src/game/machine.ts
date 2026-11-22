@@ -25,6 +25,18 @@ export interface Die {
   value: DieValue | null;
   /** Set aside earlier this turn. Held dice aren't rolled again. */
   held: boolean;
+  /** Index into `GameContext.keeps` of the keep that set this die aside; null when not held. */
+  keep: number | null;
+}
+
+/** One set of dice put aside together from a single roll. Combos never span keeps. */
+export interface Keep {
+  /** Die indices that were kept (into `GameContext.dice` at the time). */
+  dice: number[];
+  values: DieValue[];
+  points: number;
+  /** True if this keep used up the last free dice, giving the player all six back. */
+  hotDice: boolean;
 }
 
 export interface GameContext {
@@ -37,6 +49,8 @@ export interface GameContext {
   dice: Die[];
   /** Indices of dice selected to keep from the latest roll. */
   selected: number[];
+  /** Every keep this turn, oldest first (survives hot dice). `turnPoints` is their sum. */
+  keeps: Keep[];
   /** Index of the player who reached the target score, starting the final round. */
   finalRoundBy: number | null;
 }
@@ -51,7 +65,7 @@ export interface GameOutput {
   players: Player[];
 }
 
-const freshDice = (): Die[] => Array.from({ length: DICE_COUNT }, () => ({ value: null, held: false }));
+const freshDice = (): Die[] => Array.from({ length: DICE_COUNT }, () => ({ value: null, held: false, keep: null }));
 
 // ---------------------------------------------------------------------------
 // Derived values. Exported so the UI reads game state the same way the machine does.
@@ -93,6 +107,7 @@ function endTurn(ctx: GameContext, points: number): GameContext {
     turnPoints: 0,
     dice: freshDice(),
     selected: [],
+    keeps: [],
     finalRoundBy: ctx.finalRoundBy ?? (reachedTarget ? ctx.current : null),
   };
 }
@@ -138,6 +153,7 @@ export const farkleMachine = setup({
       turnPoints: 0,
       dice: freshDice(),
       selected: [],
+      keeps: [],
       finalRoundBy: null,
     };
   },
@@ -176,12 +192,17 @@ export const farkleMachine = setup({
             keepAndRoll: ({ context }) => {
               const points = selectionScore(context);
               if (points === null) return;
-              let dice = context.dice.map((die, i) => (context.selected.includes(i) ? { ...die, held: true } : die));
+              const keepIndex = context.keeps.length;
+              let dice = context.dice.map((die, i) =>
+                context.selected.includes(i) ? { ...die, held: true, keep: keepIndex } : die,
+              );
               // Hot dice: every die has scored, so the player gets all six back.
-              if (dice.every((die) => die.held)) dice = freshDice();
+              const hotDice = dice.every((die) => die.held);
+              if (hotDice) dice = freshDice();
+              const keep: Keep = { dice: context.selected, values: valuesAt(context, context.selected), points, hotDice };
               return {
                 target: "rolling",
-                context: { dice, selected: [], turnPoints: context.turnPoints + points },
+                context: { dice, selected: [], keeps: [...context.keeps, keep], turnPoints: context.turnPoints + points },
               };
             },
             bank: ({ context }) => {

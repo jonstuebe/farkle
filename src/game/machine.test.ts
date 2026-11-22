@@ -40,6 +40,36 @@ describe("farkleMachine", () => {
     expect(snap().matches({ playing: "rolling" })).toBe(true);
   });
 
+  test("keeps record each set aside separately: three 5s over three rolls are 150, not 500", () => {
+    const { actor, ctx, roll, select } = startGame();
+    roll(5, 2, 3, 4, 6, 6);
+    select(0);
+    actor.send({ type: "keepAndRoll" });
+    actor.send({ type: "rolled", values: [5, 2, 3, 4, 6] });
+    select(1);
+    actor.send({ type: "keepAndRoll" });
+    expect(ctx().keeps).toEqual([
+      { dice: [0], values: [5], points: 50, hotDice: false },
+      { dice: [1], values: [5], points: 50, hotDice: false },
+    ]);
+    expect(ctx().dice.map((d) => d.keep)).toEqual([0, 1, null, null, null, null]);
+    expect(ctx().turnPoints).toBe(100);
+  });
+
+  test("keeps survive hot dice and clear when the turn ends", () => {
+    const { actor, ctx, roll, select } = startGame();
+    roll(1, 1, 1, 5, 5, 5);
+    select(0, 1, 2, 3, 4, 5);
+    actor.send({ type: "keepAndRoll" });
+    expect(ctx().keeps).toEqual([{ dice: [0, 1, 2, 3, 4, 5], values: [1, 1, 1, 5, 5, 5], points: 2500, hotDice: true }]);
+    expect(ctx().dice.every((d) => !d.held && d.keep === null)).toBe(true);
+    actor.send({ type: "rolled", values: [1, 2, 3, 4, 6, 6] });
+    select(0);
+    actor.send({ type: "bank" });
+    expect(ctx().keeps).toEqual([]);
+    expect(ctx().players[0]!.score).toBe(2600);
+  });
+
   test("a farkle scores nothing and passes the dice", () => {
     const { actor, snap, ctx, roll, select } = startGame();
     roll(1, 2, 3, 4, 6, 6);
