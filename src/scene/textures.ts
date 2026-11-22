@@ -191,6 +191,39 @@ export const getDieGeometry = once((): BufferGeometry => {
 });
 
 // ---------------------------------------------------------------------------
+// Shared helpers for tileable surfaces
+// ---------------------------------------------------------------------------
+
+/**
+ * Tangent-space normal map from a greyscale height canvas (red channel), wrapping at the
+ * edges so it tiles. `strength` is the slope of a full black-to-white step between texels.
+ */
+function normalsFromHeight(source: HTMLCanvasElement, strength: number): HTMLCanvasElement {
+  const { width, height } = source;
+  const src = source.getContext("2d")!.getImageData(0, 0, width, height).data;
+  const { canvas, ctx } = makeCanvas(width, height);
+  const out = ctx.createImageData(width, height);
+  const at = (x: number, y: number) => src[(((y + height) % height) * width + ((x + width) % width)) * 4]! / 255;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      // Sobel-ish: average the slope over three rows / columns so single texels don't sparkle.
+      const dx = at(x + 1, y - 1) + 2 * at(x + 1, y) + at(x + 1, y + 1) - at(x - 1, y - 1) - 2 * at(x - 1, y) - at(x - 1, y + 1);
+      const dy = at(x - 1, y + 1) + 2 * at(x, y + 1) + at(x + 1, y + 1) - at(x - 1, y - 1) - 2 * at(x, y - 1) - at(x + 1, y - 1);
+      const nx = -dx * 0.25 * strength;
+      const ny = dy * 0.25 * strength; // canvas y points down, texture v points up
+      const inv = 1 / Math.hypot(nx, ny, 1);
+      const o = (y * width + x) * 4;
+      out.data[o] = (nx * inv * 0.5 + 0.5) * 255;
+      out.data[o + 1] = (ny * inv * 0.5 + 0.5) * 255;
+      out.data[o + 2] = (inv * 0.5 + 0.5) * 255;
+      out.data[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+  return canvas;
+}
+
+// ---------------------------------------------------------------------------
 // Felt
 // ---------------------------------------------------------------------------
 
@@ -216,83 +249,156 @@ function blurWrapped(src: Float32Array, size: number, radius: number): Float32Ar
   return out;
 }
 
-/** Tileable felt: fine fibre noise plus soft blotches, with a matching normal map. */
+/**
+ * Tileable wool baize: thousands of short, curled fibres lying in every direction over a
+ * deep green base, with faint cloudiness where the pile is thicker. The same fibres are
+ * drawn into a height field, so the normal map lines up with the colour exactly.
+ */
 export const getFeltTextures = once((repeat: [number, number] = [5, 4]): { map: Texture; normalMap: Texture } => {
-  const size = 256;
+  const size = 512;
   const rnd = mulberry32(1234);
-  const white = new Float32Array(size * size);
-  for (let i = 0; i < white.length; i++) white[i] = rnd() - 0.5;
-  const fine = blurWrapped(white, size, 1);
-  const blotch = blurWrapped(blurWrapped(white, size, 9), size, 9);
-
   const color = makeCanvas(size, size);
-  const normal = makeCanvas(size, size);
-  const cData = color.ctx.createImageData(size, size);
-  const nData = normal.ctx.createImageData(size, size);
-  const base = [17, 78, 46];
-  const height = (x: number, y: number) =>
-    fine[((y + size) % size) * size + ((x + size) % size)]! * 3.2 + white[((y + size) % size) * size + ((x + size) % size)]! * 0.5;
+  const relief = makeCanvas(size, size);
+  color.ctx.fillStyle = "#11573a";
+  color.ctx.fillRect(0, 0, size, size);
+  relief.ctx.fillStyle = "#7f7f7f";
+  relief.ctx.fillRect(0, 0, size, size);
+  color.ctx.lineCap = relief.ctx.lineCap = "round";
 
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const i = y * size + x;
-      const o = i * 4;
-      const shade = 1 + fine[i]! * 0.9 + white[i]! * 0.12 + blotch[i]! * 2.2;
-      cData.data[o] = Math.max(0, Math.min(255, base[0]! * shade));
-      cData.data[o + 1] = Math.max(0, Math.min(255, base[1]! * shade));
-      cData.data[o + 2] = Math.max(0, Math.min(255, base[2]! * shade));
-      cData.data[o + 3] = 255;
-
-      const nx = -(height(x + 1, y) - height(x - 1, y)) * 0.5;
-      const ny = (height(x, y + 1) - height(x, y - 1)) * 0.5;
-      const inv = 1 / Math.hypot(nx, ny, 1);
-      nData.data[o] = (nx * inv * 0.5 + 0.5) * 255;
-      nData.data[o + 1] = (ny * inv * 0.5 + 0.5) * 255;
-      nData.data[o + 2] = (inv * 0.5 + 0.5) * 255;
-      nData.data[o + 3] = 255;
+  const MARGIN = 28;
+  for (let i = 0; i < 15000; i++) {
+    const x = rnd() * size;
+    const y = rnd() * size;
+    const angle = rnd() * Math.PI * 2;
+    const length = 7 + rnd() * 17;
+    const curl = (rnd() - 0.5) * length * 0.9;
+    const ex = x + Math.cos(angle) * length;
+    const ey = y + Math.sin(angle) * length;
+    const cx = (x + ex) / 2 - Math.sin(angle) * curl;
+    const cy = (y + ey) / 2 + Math.cos(angle) * curl;
+    const raised = rnd() > 0.45;
+    const alpha = 0.05 + rnd() * 0.11;
+    const width = 0.8 + rnd() * 1.1;
+    color.ctx.strokeStyle = raised ? `rgba(96,178,128,${alpha})` : `rgba(2,26,15,${alpha * 1.5})`;
+    relief.ctx.strokeStyle = raised ? `rgba(255,255,255,${alpha * 2.2})` : `rgba(0,0,0,${alpha * 2.2})`;
+    color.ctx.lineWidth = relief.ctx.lineWidth = width;
+    // Fibres that cross an edge are drawn again on the far side, so the tile wraps.
+    const xs = x < MARGIN ? [0, size] : x > size - MARGIN ? [0, -size] : [0];
+    const ys = y < MARGIN ? [0, size] : y > size - MARGIN ? [0, -size] : [0];
+    for (const ox of xs) {
+      for (const oy of ys) {
+        for (const ctx of [color.ctx, relief.ctx]) {
+          ctx.beginPath();
+          ctx.moveTo(x + ox, y + oy);
+          ctx.quadraticCurveTo(cx + ox, cy + oy, ex + ox, ey + oy);
+          ctx.stroke();
+        }
+      }
     }
   }
-  color.ctx.putImageData(cData, 0, 0);
-  normal.ctx.putImageData(nData, 0, 0);
-  return { map: finish(color.canvas, true, repeat), normalMap: finish(normal.canvas, false, repeat) };
+
+  // Soft cloudiness: low-frequency noise multiplied into the colour.
+  const white = new Float32Array(size * size);
+  for (let i = 0; i < white.length; i++) white[i] = rnd() - 0.5;
+  const cloud = blurWrapped(blurWrapped(white, size, 12), size, 12);
+  const pixels = color.ctx.getImageData(0, 0, size, size);
+  for (let i = 0; i < cloud.length; i++) {
+    const shade = 1 + cloud[i]! * 3.2 + white[i]! * 0.05;
+    const o = i * 4;
+    pixels.data[o] = Math.min(255, pixels.data[o]! * shade);
+    pixels.data[o + 1] = Math.min(255, pixels.data[o + 1]! * shade);
+    pixels.data[o + 2] = Math.min(255, pixels.data[o + 2]! * shade);
+  }
+  color.ctx.putImageData(pixels, 0, 0);
+
+  return {
+    map: finish(color.canvas, true, repeat),
+    normalMap: finish(normalsFromHeight(relief.canvas, 3), false, repeat),
+  };
 });
 
 // ---------------------------------------------------------------------------
 // Wood
 // ---------------------------------------------------------------------------
 
-/** Dark walnut-ish grain running along U. Tileable in both directions. */
-export const getWoodTexture = once((): Texture => {
-  const w = 512;
-  const h = 256;
-  const { canvas, ctx } = makeCanvas(w, h);
+/**
+ * Dark walnut with the grain running along U, tileable in both directions: broad tonal
+ * bands, wavering grain lines, and short open pores. Grain and pores are also cut into a
+ * height field for the normal map, so the lacquer sits over wood that has real texture.
+ */
+export const getWoodTextures = once((): { map: Texture; normalMap: Texture } => {
+  const w = 1024;
+  const h = 512;
+  const color = makeCanvas(w, h);
+  const relief = makeCanvas(w, h);
   const rnd = mulberry32(99);
-  ctx.fillStyle = "#4a2a17";
-  ctx.fillRect(0, 0, w, h);
+  color.ctx.fillStyle = "#4d2b17";
+  color.ctx.fillRect(0, 0, w, h);
+  relief.ctx.fillStyle = "#808080";
+  relief.ctx.fillRect(0, 0, w, h);
 
-  // Broad tonal bands, then many thin wavering grain lines.
-  for (let i = 0; i < 14; i++) {
+  // Broad tonal bands (heartwood / sapwood), soft-edged.
+  for (let i = 0; i < 22; i++) {
     const y = rnd() * h;
-    const band = 8 + rnd() * 30;
-    ctx.fillStyle = rnd() > 0.5 ? "rgba(110,62,30,0.22)" : "rgba(20,8,2,0.22)";
-    for (const oy of [-h, 0, h]) ctx.fillRect(0, y + oy, w, band);
-  }
-  for (let i = 0; i < 260; i++) {
-    const y = rnd() * h;
-    const amp = 0.6 + rnd() * 2.2;
-    const waves = 1 + Math.floor(rnd() * 3); // whole number of waves => tiles along U
-    const phase = rnd() * Math.PI * 2;
-    ctx.strokeStyle = rnd() > 0.35 ? `rgba(18,7,2,${0.1 + rnd() * 0.3})` : `rgba(150,92,48,${0.06 + rnd() * 0.16})`;
-    ctx.lineWidth = 0.5 + rnd() * 1.4;
+    const band = 14 + rnd() * 64;
+    const warm = rnd() > 0.5;
     for (const oy of [-h, 0, h]) {
-      ctx.beginPath();
-      for (let x = 0; x <= w; x += 8) {
-        const yy = y + oy + Math.sin((x / w) * Math.PI * 2 * waves + phase) * amp;
-        if (x === 0) ctx.moveTo(x, yy);
-        else ctx.lineTo(x, yy);
-      }
-      ctx.stroke();
+      const gradient = color.ctx.createLinearGradient(0, y + oy, 0, y + oy + band);
+      const tone = warm ? "128,70,32" : "18,7,2";
+      gradient.addColorStop(0, `rgba(${tone},0)`);
+      gradient.addColorStop(0.5, `rgba(${tone},${0.16 + rnd() * 0.16})`);
+      gradient.addColorStop(1, `rgba(${tone},0)`);
+      color.ctx.fillStyle = gradient;
+      color.ctx.fillRect(0, y + oy, w, band);
     }
   }
-  return finish(canvas, true, [1, 1]);
+
+  // Wavering grain lines. A whole number of waves per tile keeps them seamless along U.
+  for (let i = 0; i < 520; i++) {
+    const y = rnd() * h;
+    const amp = 1 + rnd() * 5;
+    const waves = 1 + Math.floor(rnd() * 3);
+    const phase = rnd() * Math.PI * 2;
+    const dark = rnd() > 0.35;
+    const alpha = dark ? 0.1 + rnd() * 0.3 : 0.06 + rnd() * 0.16;
+    color.ctx.strokeStyle = dark ? `rgba(18,7,2,${alpha})` : `rgba(158,98,50,${alpha})`;
+    relief.ctx.strokeStyle = dark ? `rgba(0,0,0,${alpha * 0.9})` : `rgba(255,255,255,${alpha * 0.6})`;
+    color.ctx.lineWidth = relief.ctx.lineWidth = 0.7 + rnd() * 2.2;
+    for (const oy of [-h, 0, h]) {
+      for (const ctx of [color.ctx, relief.ctx]) {
+        ctx.beginPath();
+        for (let x = 0; x <= w; x += 8) {
+          const yy = y + oy + Math.sin((x / w) * Math.PI * 2 * waves + phase) * amp;
+          if (x === 0) ctx.moveTo(x, yy);
+          else ctx.lineTo(x, yy);
+        }
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Open pores: short dark dashes along the grain.
+  color.ctx.lineCap = relief.ctx.lineCap = "round";
+  for (let i = 0; i < 2600; i++) {
+    const x = rnd() * w;
+    const y = rnd() * h;
+    const length = 6 + rnd() * 26;
+    const alpha = 0.18 + rnd() * 0.3;
+    color.ctx.strokeStyle = `rgba(14,5,1,${alpha})`;
+    relief.ctx.strokeStyle = `rgba(0,0,0,${alpha})`;
+    color.ctx.lineWidth = relief.ctx.lineWidth = 0.6 + rnd() * 0.7;
+    for (const ox of x + length > w ? [0, -w] : [0]) {
+      for (const ctx of [color.ctx, relief.ctx]) {
+        ctx.beginPath();
+        ctx.moveTo(x + ox, y);
+        ctx.lineTo(x + ox + length, y + (rnd() - 0.5) * 1.5);
+        ctx.stroke();
+      }
+    }
+  }
+
+  return {
+    map: finish(color.canvas, true, [1, 1]),
+    normalMap: finish(normalsFromHeight(relief.canvas, 2.2), false, [1, 1]),
+  };
 });

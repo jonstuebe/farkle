@@ -1,8 +1,7 @@
 import { useMemo } from "react";
 import { CuboidCollider, RigidBody } from "@react-three/rapier";
-import { MeshPhysicalMaterial, MeshStandardMaterial } from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import { getFeltTextures, getWoodTexture } from "./textures";
+import { createFeltMaterial, createTabletopMaterial, createWoodMaterial } from "./surfaces";
 import {
   DIVIDER_HEIGHT,
   DIVIDER_THICKNESS,
@@ -26,29 +25,11 @@ const RAIL_Y = (RAIL_HEIGHT - RAIL_SINK) / 2;
  */
 export function Table() {
   const { felt, wood, tabletop, longRail, shortRail, divider } = useMemo(() => {
-    const feltTextures = getFeltTextures();
-    const woodMap = getWoodTexture();
     const railHeight = RAIL_HEIGHT + RAIL_SINK;
     return {
-      felt: new MeshPhysicalMaterial({
-        map: feltTextures.map,
-        normalMap: feltTextures.normalMap,
-        roughness: 1,
-        metalness: 0,
-        // Sheen gives the soft, velvety rim-light of real baize.
-        sheen: 0.6,
-        sheenRoughness: 0.75,
-        sheenColor: "#4fa878",
-        envMapIntensity: 0.3,
-      }),
-      wood: new MeshPhysicalMaterial({
-        map: woodMap,
-        roughness: 0.48,
-        metalness: 0,
-        clearcoat: 0.45,
-        clearcoatRoughness: 0.3,
-      }),
-      tabletop: new MeshStandardMaterial({ color: "#17110d", roughness: 0.85, metalness: 0 }),
+      felt: createFeltMaterial(),
+      wood: createWoodMaterial(),
+      tabletop: createTabletopMaterial(),
       // Both rail shapes are built long-along-X so the grain follows the rail.
       longRail: new RoundedBoxGeometry(TRAY_WIDTH + RAIL_THICKNESS * 2, railHeight, RAIL_THICKNESS, 4, 0.14),
       shortRail: new RoundedBoxGeometry(TRAY_DEPTH + RAIL_THICKNESS, railHeight, RAIL_THICKNESS, 4, 0.14),
@@ -62,7 +43,7 @@ export function Table() {
 
   return (
     <>
-      {/* Dark tabletop the tray sits on; catches the tray's shadow. */}
+      {/* Dark wooden tabletop the tray sits on; catches the tray's shadow. */}
       <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -RAIL_SINK, 0]} material={tabletop}>
         <planeGeometry args={[80, 80]} />
       </mesh>

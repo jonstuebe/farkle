@@ -15,6 +15,7 @@ import {
 } from "three";
 import { topFace, type DieValue } from "./dice";
 import { squareUpQuaternion, type Vec3 } from "./diceLayout";
+import { clearDiceOccluder, setDiceOccluder } from "./surfaces";
 import { getDiceTextures, getDieGeometry } from "./textures";
 
 const SELECT_LIFT = 0.2;
@@ -203,6 +204,8 @@ export function Die({ index, ref, initialPosition, interactive = false, selected
       // World-up expressed in the die's own frame, so the lift is always straight up.
       _up.set(0, 1, 0).applyQuaternion(_rotation.copy(group.parent.quaternion).invert());
       group.position.copy(_up).multiplyScalar(h * SELECT_LIFT);
+      // Tell the felt where this die is, so it can shade the cloth underneath.
+      setDiceOccluder(index, group.parent.position, group.parent.quaternion, h * SELECT_LIFT);
     }
     material.emissive.copy(HIGHLIGHT);
     material.emissiveIntensity = h * 0.16;
@@ -229,8 +232,9 @@ export function Die({ index, ref, initialPosition, interactive = false, selected
     () => () => {
       material.dispose();
       outlineMaterial.dispose();
+      clearDiceOccluder(index);
     },
-    [material, outlineMaterial],
+    [material, outlineMaterial, index],
   );
 
   const onClick = (event: ThreeEvent<MouseEvent>) => {
