@@ -4,6 +4,8 @@ import {
   effectiveInsets,
   fitPose,
   frameCorners,
+  growInset,
+  HUD_GAP,
   HUD_INSET_BOTTOM,
   HUD_INSET_TOP,
   LANDSCAPE_PITCH_DEG,
@@ -42,11 +44,30 @@ describe("effectiveInsets", () => {
     expect(effectiveInsets(390, 844)).toMatchObject({ top: HUD_INSET_TOP, bottom: HUD_INSET_BOTTOM });
   });
 
-  it("caps them on short viewports so the tray keeps most of the screen", () => {
-    const insets = effectiveInsets(844, 390);
-    expect(insets.top).toBeLessThan(HUD_INSET_TOP);
-    expect(insets.bottom).toBeLessThan(HUD_INSET_BOTTOM);
-    expect(390 - insets.top - insets.bottom).toBeGreaterThan(390 * 0.6);
+  it("caps them on short viewports so the tray keeps a fair share of the screen", () => {
+    // A phone on its side with a tall (8-player) scoreboard and the dock, as measured.
+    const insets = effectiveInsets(844, 390, { top: 166, bottom: 84, left: 0, right: 0 });
+    expect(insets.top).toBeLessThan(166);
+    expect(insets.bottom).toBe(84);
+    expect(390 - insets.top - insets.bottom).toBeGreaterThan(390 * 0.45);
+    // The usual landscape-phone HUD (scoreboard to ~103 px) fits uncapped.
+    expect(effectiveInsets(844, 390, { top: 112, bottom: 84, left: 0, right: 0 }).top).toBe(112);
+  });
+});
+
+describe("growInset", () => {
+  it("adds the gap, rounds up, and ignores missing measurements", () => {
+    expect(growInset(null, 94)).toBe(Math.ceil((94 + HUD_GAP) / 4) * 4);
+    expect(growInset(null, null)).toBeNull();
+    expect(growInset(120, null)).toBe(120);
+    expect(growInset(null, 0)).toBeNull();
+  });
+
+  it("only ever grows, so the camera doesn't follow the HUD around", () => {
+    const tall = growInset(null, 150);
+    expect(growInset(tall, 90)).toBe(tall);
+    expect(growInset(tall, 151)).toBe(tall); // within the rounding
+    expect(growInset(tall, 170)).toBeGreaterThan(tall!);
   });
 });
 

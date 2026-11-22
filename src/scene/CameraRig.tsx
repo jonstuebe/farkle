@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Matrix4, PerspectiveCamera, Quaternion, Vector3 } from "three";
 import { RAIL_HEIGHT, RAIL_THICKNESS, TRAY_DEPTH, TRAY_WIDTH } from "./tray";
@@ -7,8 +7,11 @@ import { RAIL_HEIGHT, RAIL_THICKNESS, TRAY_DEPTH, TRAY_WIDTH } from "./tray";
 // Tuning knobs
 // ---------------------------------------------------------------------------------------------
 
-/** Screen space (CSS px) the HUD overlay needs: the tray is framed inside what is left. */
-export const HUD_INSET_TOP = 90; // scoreboard
+/**
+ * Screen space (CSS px) the HUD overlay needs: the tray is framed inside what is left.
+ * These are fallbacks: when the HUD is on screen its real size is measured (see useHudInsets).
+ */
+export const HUD_INSET_TOP = 104; // scoreboard (ends at ~94-100 px on a phone) plus a small gap
 export const HUD_INSET_BOTTOM = 140; // action buttons
 export const HUD_INSET_LEFT = 0;
 export const HUD_INSET_RIGHT = 0;
@@ -16,8 +19,8 @@ export const HUD_INSET_RIGHT = 0;
  * On short viewports (a phone in landscape) fixed pixel insets would eat the whole screen, so
  * each inset is capped to this fraction of the viewport's height (top/bottom) or width (sides).
  */
-export const HUD_INSET_MAX_TOP = 0.14;
-export const HUD_INSET_MAX_BOTTOM = 0.22;
+export const HUD_INSET_MAX_TOP = 0.3;
+export const HUD_INSET_MAX_BOTTOM = 0.25;
 export const HUD_INSET_MAX_SIDE = 0.2;
 
 /** Breathing room around the rail, in world units. */
@@ -190,6 +193,70 @@ export function projectToScreen(point: Vec3, framing: Framing, input: FramingInp
 // Component
 // ---------------------------------------------------------------------------------------------
 
+/** Space kept between the HUD and the tray's rail, in CSS px. */
+export const HUD_GAP = 8;
+/** Elements of the HUD overlay the tray must stay clear of (the HUD's own class names). */
+const HUD_TOP_SELECTOR = ".fk-top";
+const HUD_BOTTOM_SELECTOR = ".fk-dock";
+const HUD_POLL_MS = 400;
+/** Framing changes this soon after mount (the HUD measured for the first time) jump instead of easing. */
+const JUMP_WINDOW_MS = 1000;
+
+/**
+ * Folds a measured inset into the one in use: it only grows (rounded up to 4 px), so the
+ * camera settles once instead of following the dock and scoreboard as they change height
+ * between phases. A null measurement (that part of the HUD isn't there) changes nothing.
+ */
+export function growInset(current: number | null, measured: number | null): number | null {
+  if (measured === null || !(measured > 0)) return current;
+  const next = Math.ceil((measured + HUD_GAP) / 4) * 4;
+  return current === null || next > current ? next : current;
+}
+
+/**
+ * The HUD's real top and bottom insets over the canvas, measured from the page (the
+ * scoreboard's height depends on the number of players and the layout). Falls back to the
+ * HUD_INSET_* constants where the HUD isn't on screen, and starts afresh when the viewport
+ * changes size.
+ */
+function useHudInsets(canvas: HTMLElement, width: number, height: number): Insets {
+  const [measured, setMeasured] = useState<{ top: number | null; bottom: number | null }>({ top: null, bottom: null });
+
+  useEffect(() => {
+    let current = { top: null as number | null, bottom: null as number | null };
+    setMeasured(current);
+    const measure = () => {
+      const area = canvas.getBoundingClientRect();
+      if (area.height === 0) return;
+      const box = (selector: string) => {
+        const element = document.querySelector(selector);
+        const rect = element?.getBoundingClientRect();
+        return rect && rect.width > 0 && rect.height > 0 ? rect : null;
+      };
+      const top = box(HUD_TOP_SELECTOR);
+      const bottom = box(HUD_BOTTOM_SELECTOR);
+      const next = {
+        top: growInset(current.top, top ? top.bottom - area.top : null),
+        bottom: growInset(current.bottom, bottom ? area.bottom - bottom.top : null),
+      };
+      if (next.top !== current.top || next.bottom !== current.bottom) setMeasured((current = next));
+    };
+    measure();
+    const timer = window.setInterval(measure, HUD_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [canvas, width, height]);
+
+  return useMemo(
+    () => ({
+      top: measured.top ?? HUD_INSET_TOP,
+      bottom: measured.bottom ?? HUD_INSET_BOTTOM,
+      left: HUD_INSET_LEFT,
+      right: HUD_INSET_RIGHT,
+    }),
+    [measured.top, measured.bottom],
+  );
+}
+
 /**
  * Keeps the whole tray in view at any aspect ratio (wide desktop through portrait phone), inside
  * the HUD insets, and eases to the new framing when the viewport changes. No user controls.
@@ -199,14 +266,20 @@ export function CameraRig() {
   const width = useThree((state) => state.size.width);
   const height = useThree((state) => state.size.height);
   const invalidate = useThree((state) => state.invalidate);
+  const canvas = useThree((state) => state.gl.domElement);
+  const insets = useHudInsets(canvas, width, height);
 
   const goal = useMemo(() => ({ position: new Vector3(), quaternion: new Quaternion(), basis: new Matrix4() }), []);
   const settled = useRef(true);
   const initialised = useRef(false);
+  const mountedAt = useRef(0);
+  useEffect(() => {
+    mountedAt.current = performance.now();
+  }, []);
 
   useLayoutEffect(() => {
     if (!(camera instanceof PerspectiveCamera) || width === 0 || height === 0) return;
-    const framing = computeFraming({ width, height, fovDeg: camera.fov });
+    const framing = computeFraming({ width, height, fovDeg: camera.fov, insets });
     goal.position.set(...framing.position);
     goal.basis.makeBasis(
       new Vector3(...framing.right),
@@ -214,8 +287,9 @@ export function CameraRig() {
       new Vector3(...framing.back),
     );
     goal.quaternion.setFromRotationMatrix(goal.basis);
-    if (!initialised.current) {
-      // First layout: no animation, just be in the right place.
+    if (!initialised.current || performance.now() - mountedAt.current < JUMP_WINDOW_MS) {
+      // First layout, or the HUD's measured size arriving just after: no animation, just be
+      // in the right place (this all happens behind the loading screen).
       initialised.current = true;
       camera.position.copy(goal.position);
       camera.quaternion.copy(goal.quaternion);
@@ -224,7 +298,7 @@ export function CameraRig() {
       settled.current = false;
     }
     invalidate();
-  }, [camera, width, height, goal, invalidate]);
+  }, [camera, width, height, insets, goal, invalidate]);
 
   useFrame((_, delta) => {
     if (settled.current) return;
