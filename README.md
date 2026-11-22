@@ -60,26 +60,24 @@ When a room is cancelled or expires, the Room sends `refused` and then closes th
 
 ## Deploying
 
-The site runs on Cloudflare Workers, deployed with the [`cf` CLI](https://developers.cloudflare.com/cf/). The Worker is set up in `cloudflare.config.ts`. There's no custom domain yet, so production is on the Worker's `workers.dev` URL.
+The site runs on Cloudflare Workers at **https://farkle.jonstuebe.com**, deployed with the [`cf` CLI](https://developers.cloudflare.com/cf/). The Worker is set up in `cloudflare.config.ts`. Production lives only on the custom domain (`workersDev: false`). Previews get their own `workers.dev` URLs.
 
-- **By hand:** run `npx cf auth login` once, then `bun run deploy`.
-- **Turn alerts:** once the Worker exists (after the first deploy), store the VAPID private key (the value in `.dev.vars`) as a Worker secret:
+- **On push:** Workers Builds is connected to this repo. A push to `main` deploys production. A push to any other branch puts up a Preview with its own URL and its own rooms.
+
+  | Setting                   | Value                       |
+  | ------------------------- | --------------------------- |
+  | Build command             | `npx cf build`              |
+  | Deploy command            | `npx cf deploy --prebuilt`  |
+  | Preview deploy command    | `npx cf previews deploy`    |
+
+  Use `npx` rather than `bunx` because `cf` doesn't support running under Bun.
+- **By hand:** run `npx cf auth login` once, then `bun run deploy` (or `npx cf previews deploy` for a Preview).
+- **Turn alerts:** the VAPID private key (the value in `.dev.vars`) is stored as a Worker secret. To set or rotate it:
 
   ```bash
   npx cf workers secrets update VAPID_PRIVATE_KEY --worker farkle --type secret_text --text "$(grep VAPID_PRIVATE_KEY .dev.vars | cut -d= -f2-)"
   ```
 
-  (The `cf` CLI has no `secret put`; this is its equivalent.) Also set `VAPID_SUBJECT` in `src/net/protocol.ts` to the site's real URL.
-- **Previews:** `npx cf previews deploy` puts up a Worker Preview with its own `workers.dev` URL and its own rooms. Production isn't affected.
-
-To deploy on every push, connect the repo in Workers Builds (dashboard → Workers & Pages → farkle → Settings → Builds):
-
-| Setting         | Value                               |
-| --------------- | ----------------------------------- |
-| Build command   | `bun run typecheck && bun run test` |
-| Deploy command  | `npx cf deploy`                     |
-| Preview command | `npx cf previews deploy`            |
-
-`cf deploy` runs the Vite build itself, so the build command only gates the deploy on checks. Use `npx` rather than `bunx` because `cf` doesn't support running under Bun.
+  (The `cf` CLI has no `secret put`; this is its equivalent.)
 
 The build writes to `.cloudflare/output/`, not `dist/`: the app's files and the Worker's bundle side by side.
