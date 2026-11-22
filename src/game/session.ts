@@ -11,6 +11,7 @@
  */
 import type { GameInput } from "./machine";
 import { applyIntent, replayLog, type Intent, type LogEntry } from "./log";
+import type { Reaction } from "../net/protocol";
 
 export interface SessionState {
   /** Changes on rematch; a new game number means a new log starting at seq 0. */
@@ -36,6 +37,15 @@ export interface GameSession {
   sendIntent(intent: Intent): void;
   /** The player has watched the log up to (not including) `seq`. */
   markSeen(seq: number): void;
+  /**
+   * Online only: emoji reactions. `send` goes to everyone else in the room; `subscribe` hears
+   * other players' reactions (never this device's own). Reactions are live only: not stored,
+   * not replayed. Local sessions leave this undefined.
+   */
+  readonly reactions?: {
+    send(reaction: Reaction): void;
+    subscribe(listener: (seat: number, reaction: Reaction) => void): () => void;
+  };
 }
 
 export interface LocalSessionOptions {

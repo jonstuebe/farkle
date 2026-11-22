@@ -29,7 +29,17 @@
  *   Both are stable callbacks, safe to call from event handlers at any time. Outside of
  *   `<App>` (tests, stories) they are no-ops.
  */
-import { createContext, useCallback, useContext, useMemo, useSyncExternalStore, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
+import type { Reaction } from "../net/protocol";
 import { createActorContext } from "@xstate/react";
 import { farkleMachine } from "./machine";
 import type { Intent } from "./log";
@@ -113,6 +123,22 @@ export const useMySeats = () => useSessionState((s) => s.mySeats);
 
 /** Online: per-seat "connected right now" flags. Null for local games. */
 export const useSeatPresence = () => useSessionState((s) => s.presence);
+
+/**
+ * Online emoji reactions. `send` is null for local games. `onReaction` runs for every reaction
+ * another player sends while mounted (the latest callback is used; no re-subscribe needed).
+ */
+export function useReactions(onReaction?: (seat: number, reaction: Reaction) => void): {
+  send: ((reaction: Reaction) => void) | null;
+} {
+  const { session } = useRuntime();
+  const callback = useRef(onReaction);
+  callback.current = onReaction;
+  const reactions = session.reactions;
+  useEffect(() => reactions?.subscribe((seat, reaction) => callback.current?.(seat, reaction)), [reactions]);
+  const send = useCallback((reaction: Reaction) => reactions?.send(reaction), [reactions]);
+  return { send: reactions ? send : null };
+}
 
 export function useGameSession() {
   const kind = useRuntime().session.kind;
