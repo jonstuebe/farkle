@@ -2,6 +2,7 @@ import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react
 import { Presenter } from "../../game/presenter";
 import { createOnlineSession, type OnlineSession, type RoomError } from "../../net/onlineSession";
 import { forgetRoom, rememberRoom } from "../../net/savedRooms";
+import { turnAlerts } from "../../net/turnAlerts";
 import { Screen } from "../setup/Brand";
 import { Lobby, spacedCode } from "./Lobby";
 import "./online.css";
@@ -69,8 +70,11 @@ export function RoomScreen({ code, host, deviceId, name, onHome, onJoinAnother, 
 
   // Keep "your online games" in step: seated rooms are remembered, dead ones forgotten.
   useEffect(() => {
-    if (seated) rememberRoom(code);
-  }, [seated, code]);
+    if (!seated) return;
+    rememberRoom(code);
+    // Turn alerts on? This room gets the subscription too (join or create).
+    void turnAlerts(deviceId).registerRoom(code);
+  }, [seated, code, deviceId]);
   useEffect(() => {
     if (error) forgetRoom(code);
   }, [error, code]);
@@ -151,6 +155,8 @@ export function RoomScreen({ code, host, deviceId, name, onHome, onJoinAnother, 
           return ok;
         }}
         onBack={onHome}
+        reactions={session.reactions}
+        deviceId={deviceId}
         onLeave={() => {
           // Gives the seat up on the server (later seats move up) and takes the game off this
           // device's list.

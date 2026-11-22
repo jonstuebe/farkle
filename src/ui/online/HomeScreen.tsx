@@ -4,6 +4,8 @@ import type { RoomSummary } from "../../net/protocol";
 import { forgetRoom, loadSavedRooms, type SavedRoom } from "../../net/savedRooms";
 import { Screen } from "../setup/Brand";
 import { useRoomSummaries, type SummaryState } from "./useRoomSummaries";
+import { TurnAlertsControl } from "./TurnAlertsControl";
+import { InstallHint } from "./InstallHint";
 import "./online.css";
 
 interface HomeScreenProps {
@@ -80,6 +82,7 @@ export function HomeScreen({ deviceId, name, localGame, onLocal, onHost, onJoin,
     deviceId,
   );
   const [announcement, setAnnouncement] = useState("");
+  const [installOpen, setInstallOpen] = useState(false);
   const uid = useId();
 
   // Another tab may have opened or removed a game.
@@ -121,7 +124,12 @@ export function HomeScreen({ deviceId, name, localGame, onLocal, onHost, onJoin,
             </button>
           </p>
         ) : null}
+        <InstallHint open={installOpen} onOpenChange={setInstallOpen} />
       </nav>
+
+      <section className="setup__card online__alerts-card" aria-label="Turn alerts">
+        <TurnAlertsControl deviceId={deviceId} onShowInstall={() => setInstallOpen(true)} />
+      </section>
 
       {rooms.length > 0 ? (
         <section className="setup__card online__games" aria-labelledby={`${uid}-games`}>

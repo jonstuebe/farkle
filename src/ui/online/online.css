@@ -309,10 +309,10 @@
   border-radius: var(--radius-md);
   background: rgb(0 0 0 / 0.26);
   border: 1px solid var(--line);
-  overflow: hidden;
 }
 
 .online__seat {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -419,8 +419,246 @@
   filter: saturate(0.4) brightness(0.75);
 }
 
+/* ---- Lobby reactions ---- */
+
+.online__reactions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+.online__reaction {
+  display: grid;
+  place-items: center;
+  width: var(--tap);
+  height: var(--tap);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: rgb(0 0 0 / 0.26);
+  font-size: 1.3rem;
+  line-height: 1;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast);
+}
+
+.online__reaction:hover:not(:disabled) {
+  background: rgb(0 0 0 / 0.4);
+  transform: translateY(-1px);
+}
+
+.online__reaction:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.online__reaction:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.online__reaction:disabled {
+  opacity: 0.55;
+}
+
+/* Floats up beside the seat that sent it. */
+.online__floats {
+  position: absolute;
+  left: min(58%, 220px);
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 0;
+  pointer-events: none;
+}
+
+.online__float {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  font-size: 1.6rem;
+  line-height: 1;
+  animation: online-float 2.6s var(--ease-out) forwards;
+}
+
+.online__float + .online__float {
+  left: 26px;
+}
+
+.online__float + .online__float + .online__float {
+  left: 52px;
+}
+
+@keyframes online-float {
+  0% {
+    opacity: 0;
+    transform: translateY(-50%) scale(0.4);
+  }
+  12% {
+    opacity: 1;
+    transform: translateY(-60%) scale(1.15);
+  }
+  25% {
+    transform: translateY(-70%) scale(1);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-140%) scale(1);
+  }
+}
+
+.online__quick {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+  opacity: 0.75;
+}
+
+.setup__segment .online__quick-option {
+  grid-auto-rows: min-content;
+  align-content: center;
+  gap: 2px;
+}
+
+/* ---- Turn alerts + install ---- */
+
+.online__alerts-card {
+  gap: 0;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.online__alerts-toggle {
+  align-items: flex-start;
+  padding: 4px 0;
+}
+
+.online__alerts-toggle .setup__switch {
+  margin-top: 2px;
+}
+
+.online__alerts-fixed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+.online__alerts-icon {
+  width: 18px;
+  height: 18px;
+  margin-right: 4px;
+  vertical-align: -3px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.online__alerts-state {
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: rgb(244 236 216 / 0.1);
+  color: var(--ivory-dim);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.online__alerts[data-status="on"] .online__alerts-state {
+  background: rgb(143 209 158 / 0.18);
+  color: var(--success);
+}
+
+.online__alerts[data-status="blocked"] .online__alerts-state {
+  background: rgb(240 138 115 / 0.16);
+  color: var(--danger);
+}
+
+.online__alerts-action {
+  align-self: flex-start;
+  padding: 0;
+}
+
+.online__install-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.online__install-link svg,
+.online__install-icon svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.online__install {
+  gap: 12px;
+}
+
+.online__install-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.online__install-steps li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.online__install-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: rgb(0 0 0 / 0.3);
+  color: var(--gold-bright);
+}
+
+.online__install-icon img {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .online__choice {
+  .online__choice,
+  .online__reaction {
     transition: none;
+  }
+
+  .online__float {
+    animation-name: online-fade;
+  }
+}
+
+@keyframes online-fade {
+  0%,
+  80% {
+    opacity: 1;
+    transform: translateY(-50%);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-50%);
   }
 }

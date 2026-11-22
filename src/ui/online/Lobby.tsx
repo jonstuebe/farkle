@@ -1,6 +1,17 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { MAX_SEATS, MIN_SEATS, roomPath, type RoomView } from "../../net/protocol";
-import type { LobbyRules } from "../../net/onlineSession";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  MAX_SEATS,
+  MIN_SEATS,
+  REACTION_COOLDOWN_MS,
+  REACTION_EMOJI,
+  REACTION_LABEL,
+  REACTIONS,
+  roomPath,
+  type Reaction,
+  type RoomView,
+} from "../../net/protocol";
+import type { LobbyRules, OnlineSession } from "../../net/onlineSession";
+import { TurnAlertsControl } from "./TurnAlertsControl";
 import { Screen } from "../setup/Brand";
 import "./online.css";
 
@@ -19,10 +30,18 @@ interface LobbyProps {
   onBack: () => void;
   /** Guest: take this game off my list and go home. */
   onLeave: () => void;
+  /** Emoji to and from the others in the lobby. */
+  reactions?: OnlineSession["reactions"];
+  /** For the turn-alerts switch. */
+  deviceId?: string;
 }
 
-const TARGETS = [2500, 5000, 10_000] as const;
-const ENTRY_THRESHOLD = 500;
+/** 1,000 is the quick game: a few turns each. All within the room's limits (500..100,000). */
+const QUICK_TARGET = 1000;
+const TARGETS = [QUICK_TARGET, 2500, 5000, 10_000] as const;
+const ENTRY_THRESHOLDS = [0, 350, 500] as const;
+/** How long a reaction floats next to a name. */
+const REACTION_SHOW_MS = 2600;
 const HOST_SEAT = 0;
 
 const formatScore = (n: number) => n.toLocaleString("en-US");
@@ -56,7 +75,49 @@ async function shareInvite(code: string, url: string): Promise<ShareResult | "di
 }
 
 /** Waiting room before the game starts: invite people, see who's here, set the rules, start. */
-export function Lobby({ room, mySeat, connected, onConfigure, onStart, onCancel, onBack, onLeave }: LobbyProps) {
+interface Floating {
+  id: number;
+  seat: number;
+  reaction: Reaction;
+}
+
+let nextFloatingId = 1;
+
+/** Reactions floating up beside the seats: incoming ones and this device's own. */
+function useFloatingReactions(reactions: LobbyProps["reactions"], mySeat: number) {
+  const [floating, setFloating] = useState<Floating[]>([]);
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const show = useCallback((seat: number, reaction: Reaction) => {
+    const id = nextFloatingId++;
+    // At most a few per seat, so a burst can't pile up.
+    setFloating((list) => [...list.filter((f) => f.seat !== seat).concat(list.filter((f) => f.seat === seat).slice(-2)), { id, seat, reaction }]);
+    const timer = setTimeout(() => {
+      timers.current.delete(timer);
+      setFloating((list) => list.filter((f) => f.id !== id));
+    }, REACTION_SHOW_MS);
+    timers.current.add(timer);
+  }, []);
+  useEffect(() => reactions?.subscribe(show), [reactions, show]);
+  useEffect(() => {
+    const pending = timers.current;
+    return () => pending.forEach(clearTimeout);
+  }, []);
+
+  const [coolingDown, setCoolingDown] = useState(false);
+  const send = useCallback(
+    (reaction: Reaction) => {
+      if (!reactions || coolingDown) return;
+      reactions.send(reaction);
+      show(mySeat, reaction);
+      setCoolingDown(true);
+      setTimeout(() => setCoolingDown(false), REACTION_COOLDOWN_MS);
+    },
+    [reactions, coolingDown, show, mySeat],
+  );
+  return { floating, send, coolingDown };
+}
+
+export function Lobby({ room, mySeat, connected, onConfigure, onStart, onCancel, onBack, onLeave, reactions, deviceId }: LobbyProps) {
   const isHost = mySeat === HOST_SEAT;
   const uid = useId();
   const linkRef = useRef<HTMLInputElement>(null);
@@ -64,12 +125,21 @@ export function Lobby({ room, mySeat, connected, onConfigure, onStart, onCancel,
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelFailed, setCancelFailed] = useState(false);
+  const { floating, send: react, coolingDown } = useFloatingReactions(reactions, mySeat);
+  const [heard, setHeard] = useState("");
+  useEffect(
+    () => reactions?.subscribe((seat, reaction) => setHeard(`${room.seats[seat]?.name ?? "Someone"}: ${REACTION_LABEL[reaction]}`)),
+    [reactions, room.seats],
+  );
 
   const link = inviteLink(room.code, window.location.origin);
   const host = window.location.host;
   const enough = room.seats.length >= MIN_SEATS;
   const { targetScore, entryThreshold } = room.rules;
   const targets = (TARGETS as readonly number[]).includes(targetScore) ? TARGETS : [...TARGETS, targetScore].sort((a, b) => a - b);
+  const thresholds = (ENTRY_THRESHOLDS as readonly number[]).includes(entryThreshold)
+    ? ENTRY_THRESHOLDS
+    : [...ENTRY_THRESHOLDS, entryThreshold].sort((a, b) => a - b);
 
   useEffect(() => {
     if (shareNote === null) return;
@@ -143,6 +213,15 @@ export function Lobby({ room, mySeat, connected, onConfigure, onStart, onCancel,
               <span className="online__seat-name">{seat.name}</span>
               {i === mySeat ? <span className="online__tag online__tag--you">You</span> : null}
               {i === HOST_SEAT ? <span className="online__tag">Host</span> : null}
+              <span className="online__floats" aria-hidden="true">
+                {floating
+                  .filter((f) => f.seat === i)
+                  .map((f) => (
+                    <span key={f.id} className="online__float">
+                      {REACTION_EMOJI[f.reaction]}
+                    </span>
+                  ))}
+              </span>
             </li>
           ))}
           {room.seats.length < MIN_SEATS ? (
@@ -152,6 +231,27 @@ export function Lobby({ room, mySeat, connected, onConfigure, onStart, onCancel,
             </li>
           ) : null}
         </ol>
+
+        {reactions ? (
+          <div className="online__reactions" role="group" aria-label="Send a reaction">
+            {REACTIONS.map((reaction) => (
+              <button
+                key={reaction}
+                type="button"
+                className="online__reaction"
+                onClick={() => react(reaction)}
+                disabled={!connected || coolingDown}
+                aria-label={REACTION_LABEL[reaction]}
+                title={REACTION_LABEL[reaction]}
+              >
+                <span aria-hidden="true">{REACTION_EMOJI[reaction]}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <p className="visually-hidden" role="status" aria-live="polite">
+          {heard}
+        </p>
 
         {isHost ? (
           <>
@@ -167,26 +267,40 @@ export function Lobby({ room, mySeat, connected, onConfigure, onStart, onCancel,
                       checked={targetScore === value}
                       onChange={() => onConfigure({ targetScore: value })}
                     />
-                    <span>{formatScore(value)}</span>
+                    {value === QUICK_TARGET ? (
+                      <span className="online__quick-option">
+                        <small className="online__quick">Quick</small>
+                        {formatScore(value)}
+                      </span>
+                    ) : (
+                      <span>{formatScore(value)}</span>
+                    )}
                   </label>
                 ))}
               </div>
             </fieldset>
-            <label className="setup__toggle">
-              <input
-                type="checkbox"
-                role="switch"
-                className="visually-hidden"
-                checked={entryThreshold > 0}
-                disabled={!connected}
-                onChange={(e) => onConfigure({ entryThreshold: e.target.checked ? ENTRY_THRESHOLD : 0 })}
-              />
-              <span className="setup__switch" aria-hidden="true" />
-              <span className="setup__toggle-text">
-                <span className="setup__toggle-title">{formatScore(ENTRY_THRESHOLD)} to get on the board</span>
-                <span className="setup__meta">Your first banked turn must score at least {formatScore(ENTRY_THRESHOLD)}</span>
-              </span>
-            </label>
+            <fieldset className="setup__group" disabled={!connected}>
+              <legend className="setup__legend">To get on the board</legend>
+              <div className="setup__segments" style={{ gridTemplateColumns: `repeat(${thresholds.length}, minmax(0, 1fr))` }}>
+                {thresholds.map((value) => (
+                  <label key={value} className="setup__segment">
+                    <input
+                      type="radio"
+                      name={`${uid}-entry`}
+                      className="visually-hidden"
+                      checked={entryThreshold === value}
+                      onChange={() => onConfigure({ entryThreshold: value })}
+                    />
+                    <span>{value === 0 ? "Any score" : formatScore(value)}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="setup__meta">
+                {entryThreshold > 0
+                  ? `A player's first banked turn must score at least ${formatScore(entryThreshold)}.`
+                  : "Any banked score counts from the first turn."}
+              </p>
+            </fieldset>
             <button type="button" className="setup__btn setup__btn--start" onClick={onStart} disabled={!enough || !connected}>
               Start game
             </button>
@@ -210,6 +324,12 @@ export function Lobby({ room, mySeat, connected, onConfigure, onStart, onCancel,
           </p>
         ) : null}
       </section>
+
+      {deviceId ? (
+        <section className="setup__card online__alerts-card" aria-label="Turn alerts">
+          <TurnAlertsControl deviceId={deviceId} />
+        </section>
+      ) : null}
 
       <div className="online__footer">
         {isHost ? (
