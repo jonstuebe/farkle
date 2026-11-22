@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { Euler, Quaternion, Vector3 } from "three";
-import { FACE_NORMALS, topFace, topFaceAlignment, type DieValue } from "./dice";
+import { FACE_NORMALS, topFace, topFaceAlignment } from "./dice";
 import {
   assignHeldSlots,
+  faceRemapQuaternion,
   faceUpQuaternion,
   heldSlotPosition,
   impactStrength,
@@ -12,7 +13,6 @@ import {
   phaseOf,
   readyPosition,
   REST_Y,
-  rolledValues,
   squareUpQuaternion,
 } from "./diceLayout";
 import { DIVIDER_Z, PLAY_MAX_Z, PLAY_MIN_Z, TRAY_DEPTH, TRAY_WIDTH } from "./tray";
@@ -62,27 +62,6 @@ describe("held slots", () => {
   });
 });
 
-describe("rolledValues", () => {
-  it("lists thrown dice in ascending index order", () => {
-    const readings = new Map<number, DieValue>([[4, 6], [0, 2], [2, 5]]);
-    expect(rolledValues([4, 0, 2], readings)).toEqual([2, 5, 6]);
-  });
-
-  it("ignores readings for dice that were not thrown", () => {
-    expect(rolledValues([1, 3], [6, 1, 6, 4, 6, 6])).toEqual([1, 4]);
-  });
-
-  it("is null until every thrown die has a reading", () => {
-    expect(rolledValues([0, 1], [3, null])).toBeNull();
-    expect(rolledValues([0, 5], new Map<number, DieValue>([[0, 3]]))).toBeNull();
-  });
-
-  it("handles an empty throw and duplicate indices", () => {
-    expect(rolledValues([], [])).toEqual([]);
-    expect(rolledValues([2, 2], [1, 1, 3])).toEqual([3]);
-  });
-});
-
 describe("pose helpers", () => {
   const rnd = lcg(7);
   const randomQuaternion = () =>
@@ -124,6 +103,33 @@ describe("pose helpers", () => {
       expect(topFaceAlignment(q)).toBeCloseTo(1, 9);
       expect(squareUpQuaternion(q).angleTo(q)).toBeCloseTo(0, 6);
     }
+  });
+
+  it("remaps any landed face to any target face, for every pair and orientation", () => {
+    const values = [1, 2, 3, 4, 5, 6] as const;
+    for (const landed of values) {
+      for (const target of values) {
+        const remap = faceRemapQuaternion(landed, target);
+        expect(remap.length()).toBeCloseTo(1, 9);
+        // It is a symmetry of the cube: every face normal maps onto a face normal.
+        for (const value of values) {
+          const n = new Vector3(...FACE_NORMALS[value]).applyQuaternion(remap);
+          expect(Math.max(Math.abs(n.x), Math.abs(n.y), Math.abs(n.z))).toBeCloseTo(1, 9);
+        }
+        // The target's normal ends up where the landed face's normal was.
+        const moved = new Vector3(...FACE_NORMALS[target]).applyQuaternion(remap);
+        expect(moved.distanceTo(new Vector3(...FACE_NORMALS[landed]))).toBeCloseTo(0, 9);
+        // So any body pose that shows `landed` shows `target` once remapped.
+        for (let i = 0; i < 20; i++) {
+          const yaw = new Quaternion().setFromEuler(new Euler(0.08 * (rnd() - 0.5), rnd() * 7, 0.08 * (rnd() - 0.5)));
+          const body = yaw.multiply(faceUpQuaternion(landed));
+          expect(topFace(body)).toBe(landed);
+          expect(topFace(body.clone().multiply(remap))).toBe(target);
+          expect(topFaceAlignment(body.clone().multiply(remap))).toBeCloseTo(topFaceAlignment(body), 9);
+        }
+      }
+    }
+    expect(faceRemapQuaternion(4, 4).angleTo(new Quaternion())).toBe(0);
   });
 
   it("flags leaning and stacked dice as cocked", () => {

@@ -25,3 +25,39 @@ export const DIVIDER_Z = TRAY_DEPTH / 2 - KEEP_LANE_DEPTH - DIVIDER_THICKNESS / 
 export const PLAY_MIN_Z = -TRAY_DEPTH / 2;
 export const PLAY_MAX_Z = DIVIDER_Z - DIVIDER_THICKNESS / 2;
 export const PLAY_CENTER_Z = (PLAY_MIN_Z + PLAY_MAX_Z) / 2;
+
+export interface TrayCollider {
+  halfExtents: [number, number, number];
+  position: [number, number, number];
+  friction: number;
+  restitution: number;
+  /** What a die sounds like when it hits this. */
+  surface: "felt" | "wood";
+}
+
+const FLOOR_THICKNESS = 0.5;
+const HALF_W = TRAY_WIDTH / 2;
+const HALF_D = TRAY_DEPTH / 2;
+/** Rails are harder and slicker than felt, so dice kick back off them. */
+const RAIL = { friction: 0.3, restitution: 0.45, surface: "wood" } as const;
+
+/**
+ * Every collider of the tray. The single source of truth for both the live scene (Table)
+ * and the headless throw simulation (throwSim), so a simulated throw matches what is drawn.
+ * Rails and the lane divider continue invisibly up to WALL_HEIGHT, with a lid on top.
+ */
+export const TRAY_COLLIDERS: readonly TrayCollider[] = [
+  {
+    halfExtents: [HALF_W + RAIL_THICKNESS, FLOOR_THICKNESS / 2, HALF_D + RAIL_THICKNESS],
+    position: [0, -FLOOR_THICKNESS / 2, 0],
+    friction: 0.85,
+    restitution: 0.28,
+    surface: "felt",
+  },
+  { halfExtents: [RAIL_THICKNESS / 2, WALL_HEIGHT / 2, HALF_D + RAIL_THICKNESS], position: [HALF_W + RAIL_THICKNESS / 2, WALL_HEIGHT / 2, 0], ...RAIL },
+  { halfExtents: [RAIL_THICKNESS / 2, WALL_HEIGHT / 2, HALF_D + RAIL_THICKNESS], position: [-(HALF_W + RAIL_THICKNESS / 2), WALL_HEIGHT / 2, 0], ...RAIL },
+  { halfExtents: [HALF_W + RAIL_THICKNESS, WALL_HEIGHT / 2, RAIL_THICKNESS / 2], position: [0, WALL_HEIGHT / 2, HALF_D + RAIL_THICKNESS / 2], ...RAIL },
+  { halfExtents: [HALF_W + RAIL_THICKNESS, WALL_HEIGHT / 2, RAIL_THICKNESS / 2], position: [0, WALL_HEIGHT / 2, -(HALF_D + RAIL_THICKNESS / 2)], ...RAIL },
+  { halfExtents: [HALF_W, WALL_HEIGHT / 2, DIVIDER_THICKNESS / 2], position: [0, WALL_HEIGHT / 2, DIVIDER_Z], ...RAIL },
+  { halfExtents: [HALF_W + RAIL_THICKNESS, 0.25, HALF_D + RAIL_THICKNESS], position: [0, WALL_HEIGHT + 0.25, 0], friction: 0.5, restitution: 0, surface: "wood" },
+];

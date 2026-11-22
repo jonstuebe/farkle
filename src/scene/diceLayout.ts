@@ -1,6 +1,6 @@
 /**
  * Pure layout / pose maths for the game-driven dice set: where dice wait, where kept dice
- * go, how a throw starts, and how to read a finished throw. No React, no physics engine.
+ * go, how a throw starts, and how to make a landed die show a chosen face. No React, no physics engine.
  */
 import { Quaternion, Vector3 } from "three";
 import { DIE_SIZE, FACE_NORMALS, topFace, type DieValue, type QuaternionLike } from "./dice";
@@ -43,24 +43,6 @@ export function assignHeldSlots(
   });
 }
 
-/**
- * The `rolled` payload: one value per thrown die, in ascending die-index order.
- * Returns null while any thrown die still lacks a reading.
- */
-export function rolledValues(
-  thrown: readonly number[],
-  readings: ReadonlyMap<number, DieValue> | readonly (DieValue | null | undefined)[],
-): DieValue[] | null {
-  const get = (i: number) => (readings instanceof Map ? readings.get(i) : (readings as readonly (DieValue | null | undefined)[])[i]);
-  const values: DieValue[] = [];
-  for (const index of [...new Set(thrown)].sort((a, b) => a - b)) {
-    const value = get(index);
-    if (value == null) return null;
-    values.push(value);
-  }
-  return values;
-}
-
 /** Below this the top face is visibly tilted (about 10 degrees off flat). */
 export const COCKED_ALIGNMENT = 0.985;
 
@@ -77,6 +59,25 @@ const UP = new Vector3(0, 1, 0);
 /** A square, level orientation showing `value` on top (used to seat dice from saved state). */
 export function faceUpQuaternion(value: DieValue): Quaternion {
   return new Quaternion().setFromUnitVectors(new Vector3(...FACE_NORMALS[value]), UP);
+}
+
+/**
+ * The cube symmetry that makes a die which physically landed with `landed` up show `target`
+ * instead: apply it on the right of the body's rotation (`body * remap`). Because a die is
+ * a cube, the re-oriented die occupies exactly the same space throughout its flight, so
+ * the throw looks identical and only the pips change places.
+ */
+export function faceRemapQuaternion(landed: DieValue, target: DieValue): Quaternion {
+  if (landed === target) return new Quaternion();
+  const from = new Vector3(...FACE_NORMALS[target]);
+  const to = new Vector3(...FACE_NORMALS[landed]);
+  // Opposite faces: half a turn about any axis lying in the face (pick a coordinate axis,
+  // so the result is still a symmetry of the cube).
+  if (landed + target === 7) {
+    return new Quaternion().setFromAxisAngle(from.x !== 0 ? new Vector3(0, 1, 0) : new Vector3(1, 0, 0), Math.PI);
+  }
+  // Adjacent faces: a quarter turn about the axis perpendicular to both.
+  return new Quaternion().setFromAxisAngle(new Vector3().crossVectors(from, to), Math.PI / 2);
 }
 
 /** The nearest orientation with the current top face exactly level. Keeps the die's heading. */
