@@ -687,6 +687,81 @@ describe("reconnecting", () => {
   });
 });
 
+describe("reactions", () => {
+  test("a reaction reaches everyone else, in the lobby and in the game, and never the sender", () => {
+    const t = setup();
+    const host = t.connect(HOST, "Ada", "host");
+    const bo = t.connect(BO, "Bo");
+    const cy = t.connect(CY, "Cy");
+    const heard: string[] = [];
+    host.reactions.subscribe((seat, reaction) => heard.push(`host<-${seat}:${reaction}`));
+    bo.reactions.subscribe((seat, reaction) => heard.push(`bo<-${seat}:${reaction}`));
+    cy.reactions.subscribe((seat, reaction) => heard.push(`cy<-${seat}:${reaction}`));
+
+    bo.reactions.send("fire");
+    t.settle();
+    expect(t.server.socketOf(BO)!.sent.at(-1)).toEqual({ type: "react", reaction: "fire" });
+    expect(heard.sort()).toEqual(["cy<-1:fire", "host<-1:fire"]);
+
+    heard.length = 0;
+    host.start();
+    t.settle();
+    cy.reactions.send("skull");
+    t.settle();
+    expect(heard.sort()).toEqual(["bo<-2:skull", "host<-2:skull"]);
+    // Reactions are not part of the game: nothing was logged, nobody's state object changed.
+    expect(playing(host).log).toHaveLength(0);
+  });
+
+  test("subscribers can leave; a listener that unsubscribes hears nothing more", () => {
+    const t = setup();
+    const host = t.connect(HOST, "Ada", "host");
+    const bo = t.connect(BO, "Bo");
+    const heard: string[] = [];
+    const stop = host.reactions.subscribe((_seat, reaction) => heard.push(reaction));
+    bo.reactions.send("clap");
+    t.settle();
+    stop();
+    bo.reactions.send("wow");
+    t.settle();
+    expect(heard).toEqual(["clap"]);
+  });
+
+  test("nothing is sent while the socket is down or for a name the protocol doesn't know", () => {
+    const t = setup();
+    const host = t.connect(HOST, "Ada", "host");
+    t.connect(BO, "Bo");
+    const socket = t.server.socketOf(HOST)!;
+    const before = socket.sent.length;
+    // SAFETY: deliberately not a Reaction, to check the guard.
+    host.reactions.send("poop" as never);
+    expect(socket.sent).toHaveLength(before);
+    t.server.drop(socket);
+    t.server.run();
+    host.reactions.send("fire");
+    t.settle(60_000);
+    // Not queued for the reconnect either: a reaction is about this moment.
+    expect(t.server.socketOf(HOST)!.sent.filter((m) => (m as { type: string }).type === "react")).toHaveLength(0);
+  });
+
+  test("odd reaction frames are ignored: unknown names, bad seats, seats nobody sits in", () => {
+    expect(parseServerMessage(JSON.stringify({ type: "reaction", seat: 1, reaction: "fire" }))).toEqual({ type: "reaction", seat: 1, reaction: "fire" });
+    expect(parseServerMessage(JSON.stringify({ type: "reaction", seat: 1, reaction: "<b>hi</b>" }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ type: "reaction", seat: -1, reaction: "fire" }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ type: "reaction", seat: "1", reaction: "fire" }))).toBeNull();
+
+    const t = setup();
+    const host = t.connect(HOST, "Ada", "host");
+    t.connect(BO, "Bo");
+    const heard: number[] = [];
+    host.reactions.subscribe((seat) => heard.push(seat));
+    t.server.push(t.server.socketOf(HOST)!, { type: "reaction", seat: 7, reaction: "fire" });
+    t.server.push(t.server.socketOf(HOST)!, { type: "reaction", seat: 1, reaction: "fire" });
+    t.settle();
+    expect(heard).toEqual([1]);
+  });
+});
+
 describe("rematch", () => {
   /** Ada reaches the 500 target with three 5s and Bo farkles his last turn. */
   function finishedGame() {

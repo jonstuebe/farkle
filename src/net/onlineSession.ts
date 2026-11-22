@@ -22,6 +22,8 @@
  *  - This device's seat is whatever the latest `room` message says: in the lobby a guest leaving
  *    moves later seats up one.
  *  - `refused` and the server's close codes are final: `error` says why and nothing reconnects.
+ *  - Reactions are live only: `reactions.send` is dropped while the socket is down (never queued),
+ *    and `reactions.subscribe` hears what other players send, in the lobby and in the game.
  */
 import type { GameInput } from "../game/machine";
 import type { Intent, LogEntry } from "../game/log";
@@ -31,7 +33,9 @@ import {
   CLOSE_CANCELLED,
   CLOSE_EXPIRED,
   CLOSE_REFUSED,
+  isReaction,
   type ClientMessage,
+  type Reaction,
   type Refusal,
   type RoomView,
   type ServerMessage,
@@ -71,6 +75,8 @@ export type LobbyRules = Extract<ClientMessage, { type: "configure" }>["rules"];
 export interface OnlineSession extends GameSession {
   readonly kind: "online";
   readonly code: string;
+  /** Always there online (optional on GameSession because local games have none). */
+  readonly reactions: NonNullable<GameSession["reactions"]>;
   getRoom(): OnlineRoomState;
   /** Start connecting. Safe to call more than once. */
   open(): void;
@@ -183,6 +189,7 @@ function browserEnv(): OnlineEnv {
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
 
 /** Parses a text frame. Null for anything that isn't a message we know. */
 export function parseServerMessage(data: unknown): ServerMessage | null {
@@ -211,6 +218,10 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
       return message.reason === "missing" || message.reason === "full" || message.reason === "started"
         ? (message as ServerMessage)
         : null;
+    case "reaction":
+      return isCount(message.seat) && isReaction(message.reaction)
+        ? { type: "reaction", seat: message.seat, reaction: message.reaction }
+        : null;
     default:
       return null;
   }
@@ -220,6 +231,7 @@ export function createOnlineSession(options: OnlineSessionOptions): OnlineSessio
   const env: OnlineEnv = { ...browserEnv(), ...options.env };
   const { code, deviceId, name } = options;
   const listeners = new Set<() => void>();
+  const reactionListeners = new Set<(seat: number, reaction: Reaction) => void>();
 
   let intent = options.intent;
   let roomState: OnlineRoomState = { status: "connecting", room: null, seat: null, error: null };
@@ -496,6 +508,13 @@ export function createOnlineSession(options: OnlineSessionOptions): OnlineSessio
         else finish(message.reason);
         break;
       }
+      case "reaction": {
+        // A seat that isn't at the table (a stale frame around a lobby leave) has nobody to show it on.
+        const seats = roomState.room?.seats.length ?? 0;
+        if (message.seat >= seats) break;
+        for (const listener of [...reactionListeners]) listener(message.seat, message.reaction);
+        break;
+      }
     }
   }
 
@@ -574,6 +593,15 @@ export function createOnlineSession(options: OnlineSessionOptions): OnlineSessio
     },
     cancel() {
       return env.cancelInvite(code, deviceId);
+    },
+    reactions: {
+      send(reaction) {
+        if (isReaction(reaction)) send({ type: "react", reaction });
+      },
+      subscribe(listener) {
+        reactionListeners.add(listener);
+        return () => reactionListeners.delete(listener);
+      },
     },
   };
 }

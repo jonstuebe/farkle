@@ -9,7 +9,7 @@
  */
 import type { DieValue } from "../game/scoring";
 import type { SocketLike } from "./onlineSession";
-import { CLOSE_CANCELLED, CLOSE_EXPIRED, CLOSE_REFUSED, type ServerMessage } from "./protocol";
+import { CLOSE_CANCELLED, CLOSE_EXPIRED, CLOSE_REFUSED, isReaction, type Reaction, type ServerMessage } from "./protocol";
 import {
   applyMessage,
   cancellationOf,
@@ -26,6 +26,16 @@ import {
 const CONNECTING = 0;
 const OPEN = 1;
 const CLOSED = 3;
+
+/** The reaction in a `react` frame, or null for any other frame (or a name the protocol doesn't know). */
+function reactionOf(data: string): Reaction | null {
+  try {
+    const value = JSON.parse(data) as { type?: unknown; reaction?: unknown } | null;
+    return value?.type === "react" && isReaction(value.reaction) ? value.reaction : null;
+  } catch {
+    return null;
+  }
+}
 
 export class FakeSocket implements SocketLike {
   readyState = CONNECTING;
@@ -132,8 +142,19 @@ export class FakeRoomServer {
   // --- used by FakeSocket ------------------------------------------------------------------------
 
   receive(socket: FakeSocket, data: string): void {
+    if (!this.room || socket.seat === null) return;
+    const reaction = reactionOf(data);
+    if (reaction) {
+      // Relayed to everyone except the sender's device (all of its sockets), never stored.
+      const device = socket.url.searchParams.get("device");
+      for (const s of this.openSockets) {
+        if (s.url.searchParams.get("device") === device) continue;
+        this.push(s, { type: "reaction", seat: socket.seat, reaction });
+      }
+      return;
+    }
     const message = parseClientMessage(data);
-    if (!message || !this.room || socket.seat === null) return;
+    if (!message) return;
     const outcome = applyMessage(this.room, socket.seat, message, this.randomDie);
     switch (outcome.kind) {
       case "ignored":
