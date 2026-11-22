@@ -190,7 +190,7 @@ export const REACTION_COOLDOWN_MS = 1000;
 
 /** Public half of the VAPID key pair (scripts/vapid.ts). The private half is the Worker secret VAPID_PRIVATE_KEY (.dev.vars locally). */
 export const VAPID_PUBLIC_KEY = "BDmLWwOcv4WS1Fd1wPG1OPOmRztPfB1Lq5GoxCUfe5zWP2N27Ke91d5r3Su9cKZsY4uK25aVnc1q82I081lYud8";
-/** Push services want a contact for the sender. TODO(deploy): set to the real farkle URL. */
+/** Push services want a contact for whoever sends the alerts: the production site. */
 export const VAPID_SUBJECT = "https://farkle.jonstuebe.com";
 
 /** PushSubscription.toJSON(): the part the server needs to reach the device. */

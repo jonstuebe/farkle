@@ -6,9 +6,11 @@ export default defineConfig({
   worker: {
     name: "farkle",
     compatibilityDate: "2026-11-19",
-    // No custom domain yet: production is farkle.<subdomain>.workers.dev, and every preview
-    // gets its own *-farkle.<subdomain>.workers.dev URL.
-    workersDev: true,
+    domains: ["farkle.jonstuebe.com"],
+    // Production lives only on the custom domain. Previews (Workers Builds, one per branch/PR)
+    // get their own *-farkle.<subdomain>.workers.dev URL. With a custom domain set, both default
+    // to off, so they're set explicitly here; otherwise each deploy would flip the dashboard toggles back.
+    workersDev: false,
     previewUrls: true,
     observability: {
       enabled: true,
