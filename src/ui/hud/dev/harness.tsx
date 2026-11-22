@@ -9,6 +9,8 @@
  *   /src/ui/hud/dev/harness.html?scene=over          finished game
  *   /src/ui/hud/dev/harness.html?scene=keeps         my turn, a 5 kept from each of two rolls, a third 5 up
  *   /src/ui/hud/dev/harness.html?scene=crowd         eight players, my turn (seat 6)
+ *   /src/ui/hud/dev/harness.html?scene=crowdFinal    eight players in the final round
+ *   /src/ui/hud/dev/harness.html?scene=duo           two players, my turn
  *   &local=1       a local session instead (no reactions)
  *   &connected=0   start disconnected        &away=0,1   seats shown as away
  *   &canvas=0      no 3D scene: throws settle on a timer instead
@@ -102,8 +104,17 @@ function buildScene(name: string): Scene {
       ]);
       return { input, log, seenFrom: log.length };
     }
-    case "crowd": {
-      const input: GameInput = { players: ["Ada", "Bo", "Cyrus", "Dee", "Eliza", "Finn", "Jon", "Hana"] };
+    case "duo": {
+      const input: GameInput = { players: ["Ada", "Jon"] };
+      const log = playScript(input, BO_BANKS_1000);
+      return { input, log, seenFrom: log.length, mySeat: 1 };
+    }
+    case "crowd":
+    case "crowdFinal": {
+      const input: GameInput = {
+        players: ["Ada", "Bo", "Cyrus", "Dee", "Eliza", "Finn", "Jon", "Hana"],
+        rules: name === "crowdFinal" ? { targetScore: 1000 } : undefined,
+      };
       const steps: Step[] = [];
       for (let seat = 0; seat < 6; seat++) steps.push(...(seat % 2 ? BO_BANKS_1000 : ME_BANK_300));
       const log = playScript(input, steps);
