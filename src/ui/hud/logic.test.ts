@@ -27,6 +27,18 @@ import {
   turnHint,
   viewOf,
   winnerHeadline,
+  keepStrip,
+  keepChipLabel,
+  splitComboFace,
+  splitComboTip,
+  farkleRisk,
+  rollRisk,
+  rollRiskText,
+  formatRisk,
+  dismissedTips,
+  dismissTip,
+  floatAnchor,
+  TIPS_STORAGE_KEY,
   type Feedback,
   type Table,
 } from "./logic";
@@ -496,5 +508,112 @@ describe("online play", () => {
     g.send({ type: "passTurn" });
     expect(burstFeedback(start, g.view())).toEqual({ banners: [], sounds: ["win"] });
     expect(burstFeedback(g.view(), g.view())).toEqual({ banners: [], sounds: [] });
+  });
+});
+
+describe("keeps", () => {
+  test("three 5s over three rolls are three 50 chips, plus the pending pick", () => {
+    const g = startGame();
+    g.roll(5, 2, 3, 4, 6, 6);
+    g.select(0);
+    g.roll(5, 2, 3, 4, 6);
+    g.select(1);
+    g.roll(5, 2, 3, 4);
+    g.select(2);
+    const strip = keepStrip(g.view(), 1000);
+    expect(strip.hidden).toBe(0);
+    expect(strip.chips.map((c) => [c.faces, c.points, c.pending])).toEqual([
+      [[5], 50, false],
+      [[5], 50, false],
+      [[5], 50, true],
+    ]);
+    expect(splitComboFace(g.view())).toBe(5);
+    expect(keepChipLabel(strip.chips[2]!)).toBe("Picked 5 for 50 points");
+  });
+
+  test("a combo in one roll is one chip and no tip; hot dice are marked", () => {
+    const g = startGame();
+    g.roll(5, 5, 5, 1, 2, 3);
+    g.select(0, 1, 2, 3);
+    expect(splitComboFace(g.view())).toBeNull();
+    g.roll(1, 5);
+    g.select(4, 5);
+    const chips = keepStrip(g.view(), 1000).chips;
+    expect(chips.map((c) => [c.faces, c.points, c.hotDice])).toEqual([
+      [[1, 5, 5, 5], 600, false],
+      [[1, 5], 150, true],
+    ]);
+    expect(keepChipLabel(chips[0]!)).toBe("Kept 1, 5, 5, 5 for 600 points");
+    expect(keepChipLabel(chips[1]!)).toMatch(/hot dice$/);
+    // Two 1s and five 5s are spread over two keeps; 5s are 3+ in total -> tip.
+    expect(splitComboFace(g.view())).toBe(5);
+  });
+
+  test("an invalid pick adds no chip, and the oldest keeps fold into +N", () => {
+    const g = startGame();
+    g.roll(1, 2, 3, 4, 6, 6);
+    g.select(0);
+    g.roll(1, 2, 3, 4, 6);
+    g.select(1);
+    g.roll(1, 2, 3, 4);
+    g.select(2);
+    g.roll(1, 2, 3);
+    g.select(4);
+    expect(keepStrip(g.view(), 1000).chips).toHaveLength(3);
+    const narrow = keepStrip(g.view(), 100);
+    expect(narrow.hidden).toBeGreaterThan(0);
+    expect(narrow.hiddenPoints).toBe(narrow.hidden * 100);
+    expect(narrow.hidden + narrow.chips.length).toBe(3);
+    // Never folds the last chip.
+    expect(keepStrip(g.view(), 0).chips).toHaveLength(1);
+  });
+
+  test("tip text follows the rules", () => {
+    expect(splitComboTip(DEFAULT_SCORING)).toBe(
+      "Combos only count within a single roll. Three 5s from separate rolls are 50 each (not 500).",
+    );
+  });
+});
+
+describe("farkle risk", () => {
+  test("standard scoring", () => {
+    const pct = (n: number) => Math.round(farkleRisk(n, DEFAULT_SCORING) * 1000) / 10;
+    expect([1, 2, 3, 4, 5, 6].map(pct)).toEqual([66.7, 44.4, 27.8, 15.7, 7.7, 2.3]);
+    expect(farkleRisk(0, DEFAULT_SCORING)).toBe(0);
+  });
+
+  test("next roll: free dice, minus the pick, hot dice back to six", () => {
+    const g = startGame();
+    expect(rollRiskText(rollRisk(g.view())!)).toBe("6 dice · 2% farkle risk");
+    g.roll(1, 2, 3, 4, 6, 6);
+    expect(rollRisk(g.view())).toBeNull(); // nothing picked
+    g.select(0);
+    expect(rollRiskText(rollRisk(g.view())!)).toBe("5 dice · 8% farkle risk");
+    g.roll(1, 1, 1, 5, 5);
+    g.select(1, 2, 3, 4, 5);
+    expect(rollRisk(g.view())!.dice).toBe(6);
+    expect(formatRisk(0.001)).toBe("<1%");
+    expect(formatRisk(0.278)).toBe("28%");
+  });
+});
+
+describe("tips and floats", () => {
+  test("dismissal is remembered; junk storage is ignored", () => {
+    const data = new Map<string, string>();
+    const store = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v) };
+    expect(dismissedTips(store)).toEqual([]);
+    dismissTip(store, "combosPerRoll");
+    expect(dismissedTips(store)).toEqual(["combosPerRoll"]);
+    expect(JSON.parse(data.get(TIPS_STORAGE_KEY)!)).toEqual({ dismissed: ["combosPerRoll"] });
+    data.set(TIPS_STORAGE_KEY, "{oops");
+    expect(dismissedTips(store)).toEqual([]);
+    expect(dismissedTips(null)).toEqual([]);
+  });
+
+  test("float anchor stays inside the visible strip", () => {
+    const strip = { left: 0, right: 390 };
+    expect(floatAnchor({ left: 100, right: 200, bottom: 50 }, strip)).toEqual({ x: 150, y: 50 });
+    expect(floatAnchor({ left: 500, right: 600, bottom: 50 }, strip).x).toBe(372);
+    expect(floatAnchor({ left: -300, right: -200, bottom: 50 }, strip).x).toBe(18);
   });
 });

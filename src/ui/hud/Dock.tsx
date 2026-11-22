@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
+import { ComboTip, KeepStrip } from "./Keeps";
 import { pendingTurnTotal, selectionScore } from "../../game/machine";
 import type { Intent } from "../../game/log";
 import {
@@ -8,6 +9,8 @@ import {
   isMyTurn,
   needsEntry,
   replayStatus,
+  rollRisk,
+  rollRiskText,
   turnHint,
   turnTitle,
   upNextText,
@@ -74,6 +77,9 @@ export function Dock({ view, send, table, canAct, connected, currentAway, replay
   const farkled = phase === "farkled";
   const total = farkled ? 0 : pendingTurnTotal(context);
   const actionsRef = useRef<HTMLDivElement>(null);
+  const riskId = useId();
+  // Only worth showing when the player can actually roll now.
+  const risk = mode === "act" && actions.primary.enabled ? rollRisk(view) : null;
 
   const run = (button: ActionButton | null) => {
     if (mode === "act" && button?.enabled && button.event) send({ type: button.event });
@@ -135,6 +141,7 @@ export function Dock({ view, send, table, canAct, connected, currentAway, replay
 
   return (
     <div className={`fk-dock fk-dock--${mode}`}>
+      <ComboTip view={view} active={mode === "act"} />
       <section className={`fk-panel fk-turn${farkled ? " fk-turn--farkled" : ""}`} aria-label="Current turn">
         <div className="fk-turn__who">
           <span className="fk-turn__name">{table.online ? turnTitle(view, table) : player?.name}</span>
@@ -154,6 +161,7 @@ export function Dock({ view, send, table, canAct, connected, currentAway, replay
             <dd>{formatPoints(total)}</dd>
           </div>
         </dl>
+        <KeepStrip view={view} />
         {mode === "act" && needsEntry(context) && (
           <p className="fk-turn__entry">
             Needs {formatPoints(context.rules.entryThreshold)} in one turn to get on the board
@@ -208,9 +216,17 @@ export function Dock({ view, send, table, canAct, connected, currentAway, replay
             }`}
             aria-disabled={!actions.primary.enabled}
             aria-keyshortcuts={primaryKey}
+            aria-describedby={risk ? riskId : undefined}
             onClick={() => run(actions.primary)}
           >
-            <span className="fk-button__label">{actions.primary.label}</span>
+            <span className="fk-button__text">
+              <span className="fk-button__label">{actions.primary.label}</span>
+              {risk && (
+                <span className="fk-button__risk" id={riskId} aria-hidden="true">
+                  {rollRiskText(risk)}
+                </span>
+              )}
+            </span>
             {actions.primary.enabled && <kbd className="fk-key">{primaryKey}</kbd>}
           </button>
           {actions.bank && (

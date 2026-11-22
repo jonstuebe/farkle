@@ -6,7 +6,7 @@ import {
   type GameContext,
   type Player,
 } from "../../game/machine";
-import type { ScoringTable } from "../../game/scoring";
+import { DICE_COUNT, hasScoringDice, scoreDice, type DieValue, type ScoringTable } from "../../game/scoring";
 
 /** Pure HUD logic: everything here is derived from game state and unit-tested. */
 
@@ -438,4 +438,230 @@ export const gameOverLabels = (online: boolean): GameOverLabels =>
 export function burstFeedback(first: HudView, last: HudView): Feedback {
   const ended = first.phase !== "done" && last.phase === "done";
   return { banners: [], sounds: ended ? ["win"] : [] };
+}
+
+// ---------------------------------------------------------------------------
+// Keeps: what the turn is made of
+// ---------------------------------------------------------------------------
+
+export interface KeepChip {
+  /** Kept faces, lowest first. */
+  faces: DieValue[];
+  points: number;
+  /** This keep used every free die, so all six were rolled again. */
+  hotDice: boolean;
+  /** The current selection: not kept yet. */
+  pending: boolean;
+}
+
+export interface KeepStrip {
+  /** Older keeps left out so the strip fits on one line (shown as "+N"). */
+  hidden: number;
+  /** Points of the keeps left out. */
+  hiddenPoints: number;
+  chips: KeepChip[];
+}
+
+/** Room for chips on one line of the turn panel on the narrowest phone we lay out for (360px). */
+export const KEEP_STRIP_WIDTH = 300;
+const CHIP_GAP = 5;
+const MORE_CHIP_WIDTH = 34;
+
+/** Rough rendered width of a chip in CSS px; mirrors `.fk-keep` in hud.css. */
+export function keepChipWidth(chip: KeepChip): number {
+  const text = formatPoints(chip.points).length + (chip.pending ? 1 : 0);
+  return 14 + chip.faces.length * 15 + text * 7.5 + (chip.hotDice ? 16 : 0);
+}
+
+const sortedFaces = (values: readonly DieValue[]): DieValue[] => [...values].sort((a, b) => a - b);
+
+/** The valid selection as a chip, or null when nothing (or nothing that scores) is picked. */
+function pendingChip({ phase, context: ctx }: HudView): KeepChip | null {
+  if (phase !== "choosing") return null;
+  const points = selectionScore(ctx);
+  if (points === null) return null;
+  const faces = ctx.selected.flatMap((i) => ctx.dice[i]?.value ?? []);
+  return {
+    faces: sortedFaces(faces),
+    points,
+    hotDice: ctx.selected.length === freeDiceIndices(ctx).length,
+    pending: true,
+  };
+}
+
+/**
+ * The turn as chips, oldest keep first, then the current selection. When they would not fit in
+ * `width`, the oldest keeps collapse into a count.
+ */
+export function keepStrip(view: HudView, width = KEEP_STRIP_WIDTH): KeepStrip {
+  const all: KeepChip[] = view.context.keeps.map((keep) => ({
+    faces: sortedFaces(keep.values),
+    points: keep.points,
+    hotDice: keep.hotDice,
+    pending: false,
+  }));
+  const pending = pendingChip(view);
+  if (pending) all.push(pending);
+
+  const total = (chips: KeepChip[]) =>
+    chips.reduce((sum, chip) => sum + keepChipWidth(chip), 0) + Math.max(chips.length - 1, 0) * CHIP_GAP;
+  let hidden = 0;
+  while (
+    all.length - hidden > 1 &&
+    total(all.slice(hidden)) + (hidden > 0 ? MORE_CHIP_WIDTH + CHIP_GAP : 0) > width
+  ) {
+    hidden++;
+  }
+  return {
+    hidden,
+    hiddenPoints: all.slice(0, hidden).reduce((sum, chip) => sum + chip.points, 0),
+    chips: all.slice(hidden),
+  };
+}
+
+/** For screen readers: "Kept 5, 5, 5 for 500 points, hot dice". */
+export function keepChipLabel(chip: KeepChip): string {
+  const what = `${chip.pending ? "Picked" : "Kept"} ${chip.faces.join(", ")} for ${formatPoints(chip.points)} ${
+    chip.points === 1 ? "point" : "points"
+  }`;
+  return chip.hotDice ? `${what}, hot dice` : what;
+}
+
+/**
+ * A face the player has set aside three or more times this turn, in separate keeps: together
+ * those dice would have been a combination, apart they only score as singles (or less). Counts
+ * the current selection too, since that is the moment the score looks wrong. Null when there is
+ * no such face.
+ */
+export function splitComboFace(view: HudView): DieValue | null {
+  const sets: DieValue[][] = view.context.keeps.map((keep) => keep.values);
+  const pending = pendingChip(view);
+  if (pending) sets.push(pending.faces);
+  for (let face = 1; face <= DICE_COUNT; face++) {
+    const counts = sets.map((values) => values.filter((v) => v === face).length).filter((n) => n > 0);
+    const dice = counts.reduce((sum, n) => sum + n, 0);
+    if (counts.length >= 2 && dice >= 3) return face as DieValue;
+  }
+  return null;
+}
+
+/** The one-time tip, worded from the rules in play (a single 5 is 50 by default). */
+export function splitComboTip(table: ScoringTable): string {
+  const three = scoreDice([5, 5, 5], table);
+  const worth = three === null ? "" : ` (not ${formatPoints(three)})`;
+  return `Combos only count within a single roll. Three 5s from separate rolls are ${formatPoints(
+    table.singleFive,
+  )} each${worth}.`;
+}
+
+// ---------------------------------------------------------------------------
+// Farkle risk
+// ---------------------------------------------------------------------------
+
+const riskCache = new Map<string, number>();
+
+/**
+ * Chance (0..1) that a roll of `dice` dice has nothing to keep, found by scoring every possible
+ * outcome with the rules in play. At most 6^6 outcomes, and each answer is remembered.
+ */
+export function farkleRisk(dice: number, table: ScoringTable): number {
+  if (!Number.isInteger(dice) || dice < 1 || dice > DICE_COUNT) return 0;
+  const key = `${dice}|${JSON.stringify(table)}`;
+  const known = riskCache.get(key);
+  if (known !== undefined) return known;
+
+  const values: DieValue[] = new Array<DieValue>(dice).fill(1);
+  let outcomes = 0;
+  let farkles = 0;
+  for (;;) {
+    outcomes++;
+    if (!hasScoringDice(values, table)) farkles++;
+    // Count up like an odometer with faces 1..6.
+    let at = 0;
+    while (at < dice && values[at] === 6) values[at++] = 1;
+    if (at === dice) break;
+    values[at] = (values[at]! + 1) as DieValue;
+  }
+  const risk = farkles / outcomes;
+  riskCache.set(key, risk);
+  return risk;
+}
+
+export interface RollRisk {
+  /** Dice the next roll would throw. */
+  dice: number;
+  risk: number;
+}
+
+/** The next roll's farkle risk, when the current player is in a position to roll. */
+export function rollRisk({ phase, context: ctx }: HudView): RollRisk | null {
+  let dice: number;
+  if (phase === "awaitingRoll") {
+    dice = freeDiceIndices(ctx).length || DICE_COUNT;
+  } else if (phase === "choosing" && selectionScore(ctx) !== null) {
+    // Keeping every free die is hot dice: all six come back.
+    dice = freeDiceIndices(ctx).length - ctx.selected.length || DICE_COUNT;
+  } else {
+    return null;
+  }
+  return { dice, risk: farkleRisk(dice, ctx.rules.scoring) };
+}
+
+export function formatRisk(risk: number): string {
+  const percent = Math.round(risk * 100);
+  if (percent === 0 && risk > 0) return "<1%";
+  if (percent === 100 && risk < 1) return ">99%";
+  return `${percent}%`;
+}
+
+/** "3 dice · 28% farkle risk" */
+export const rollRiskText = ({ dice, risk }: RollRisk): string =>
+  `${dice} ${dice === 1 ? "die" : "dice"} · ${formatRisk(risk)} farkle risk`;
+
+// ---------------------------------------------------------------------------
+// Tips shown once
+// ---------------------------------------------------------------------------
+
+export const TIPS_STORAGE_KEY = "farkle.tips.v1";
+export type TipId = "combosPerRoll";
+
+type Store = Pick<Storage, "getItem" | "setItem">;
+
+/** Tips the player has dismissed. Anything unreadable counts as "none yet". */
+export function dismissedTips(store: Store | null): TipId[] {
+  try {
+    const parsed: unknown = JSON.parse(store?.getItem(TIPS_STORAGE_KEY) ?? "null");
+    const dismissed = (parsed as { dismissed?: unknown } | null)?.dismissed;
+    return Array.isArray(dismissed) ? dismissed.filter((id): id is TipId => id === "combosPerRoll") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function dismissTip(store: Store | null, tip: TipId): void {
+  try {
+    const dismissed = new Set(dismissedTips(store)).add(tip);
+    store?.setItem(TIPS_STORAGE_KEY, JSON.stringify({ dismissed: [...dismissed] }));
+  } catch {
+    // Private mode or a full disk: the tip simply shows again next time.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Reactions
+// ---------------------------------------------------------------------------
+
+/**
+ * Where a reaction appears: centred under its sender's chip, but never outside the visible part
+ * of the scoreboard strip (on a phone the chip may be scrolled out of view).
+ */
+export function floatAnchor(
+  chip: { left: number; right: number; bottom: number },
+  strip: { left: number; right: number },
+  margin = 18,
+): { x: number; y: number } {
+  const centre = (chip.left + chip.right) / 2;
+  const min = strip.left + margin;
+  const max = Math.max(min, strip.right - margin);
+  return { x: Math.min(Math.max(centre, min), max), y: chip.bottom };
 }

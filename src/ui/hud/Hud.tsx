@@ -16,6 +16,7 @@ import { Banners, useBanners } from "./Banners";
 import { Dock } from "./Dock";
 import { GameOver } from "./GameOver";
 import { RulesPanel } from "./RulesPanel";
+import { ReactionButton, ReactionFloats, useReactionFloats } from "./Reactions";
 import { Scoreboard } from "./Scoreboard";
 import { viewOf, type Table } from "./logic";
 import "./hud.css";
@@ -55,6 +56,8 @@ export function Hud({ onNewGame }: HudProps) {
 
   const online = session.kind === "online";
   const table = useMemo<Table>(() => ({ online, mySeats }), [online, mySeats]);
+  const names = useMemo(() => view.context.players.map((p) => p.name), [view.context.players]);
+  const reactions = useReactionFloats(online ? (mySeats[0] ?? null) : null, names);
   const banners = useBanners(actor, { table, replaying: replay.replaying, snapCount });
 
   // Dev-only handle for driving the game from the console or a headless browser:
@@ -84,9 +87,11 @@ export function Hud({ onNewGame }: HudProps) {
           presence={online ? presence : null}
           rulesOpen={rulesOpen}
           onToggleRules={() => setRulesOpen((o) => !o)}
+          tools={reactions.send && <ReactionButton send={reactions.send} cooling={reactions.coolUntil > 0} />}
         />
       </div>
       <Banners banners={banners} reconnecting={reconnecting} />
+      <ReactionFloats floats={reactions.floats} />
       {!done && (
         <Dock
           view={view}

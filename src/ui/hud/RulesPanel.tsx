@@ -58,6 +58,11 @@ export function RulesPanel({ rules, onClose }: RulesPanelProps) {
         </table>
         <ul className="fk-rules__notes">
           <li>The last four combinations need all six dice in one roll.</li>
+          <li>
+            Combinations only count within a single roll: dice kept from different rolls never add up. Three 5s
+            kept over three rolls are {formatPoints(rules.scoring.singleFive)} each, not{" "}
+            {formatPoints(rules.scoring.threeOfAKindMultiplier * 5)}.
+          </li>
           <li>Every die you keep must score. No scoring dice in a roll is a farkle: the turn's points are lost.</li>
           <li>Score with all six dice (hot dice) and you roll all six again.</li>
           <li>

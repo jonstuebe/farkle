@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 import type { GameContext } from "../../game/machine";
 import { finalRoundInfo, finalRoundText, formatPoints, isYou, type Table } from "./logic";
 
@@ -10,27 +11,50 @@ export interface ScoreboardProps {
   presence: readonly boolean[] | null;
   rulesOpen: boolean;
   onToggleRules: () => void;
+  /** Extra controls next to the Scoring button (the reaction picker online). */
+  tools?: ReactNode;
 }
 
-export function Scoreboard({ context, done, table, presence, rulesOpen, onToggleRules }: ScoreboardProps) {
+/** More players than this get the compact chips (a scrolling strip on a phone). */
+const DENSE_FROM = 5;
+
+export function Scoreboard({ context, done, table, presence, rulesOpen, onToggleRules, tools }: ScoreboardProps) {
   const finalRound = done ? null : finalRoundInfo(context);
+  const dense = context.players.length >= DENSE_FROM;
+  const listRef = useRef<HTMLOListElement>(null);
+
+  // On a phone a crowded table scrolls sideways: keep whoever is up in view.
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list || list.scrollWidth <= list.clientWidth) return;
+    const chip = list.querySelector<HTMLElement>(`[data-seat="${context.current}"]`);
+    if (!chip) return;
+    const left = chip.offsetLeft - list.offsetLeft;
+    const target = left - (list.clientWidth - chip.offsetWidth) / 2;
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    list.scrollTo({ left: Math.max(0, target), behavior: reduce ? "auto" : "smooth" });
+  }, [context.current, context.players.length]);
+
   return (
     <section className="fk-panel fk-scoreboard" aria-label="Scoreboard">
       <header className="fk-scoreboard__head">
         <span className="fk-scoreboard__target">
           First to <strong>{formatPoints(context.rules.targetScore)}</strong>
         </span>
-        <button
-          type="button"
-          className="fk-chip-button"
-          aria-expanded={rulesOpen}
-          aria-controls="fk-rules"
-          onClick={onToggleRules}
-        >
-          Scoring
-        </button>
+        <div className="fk-scoreboard__tools">
+          {tools}
+          <button
+            type="button"
+            className="fk-chip-button"
+            aria-expanded={rulesOpen}
+            aria-controls="fk-rules"
+            onClick={onToggleRules}
+          >
+            Scoring
+          </button>
+        </div>
       </header>
-      <ol className={`fk-players${context.players.length > 4 ? " fk-players--dense" : ""}`}>
+      <ol ref={listRef} className={`fk-players${dense ? " fk-players--dense" : ""}`}>
         {context.players.map((player, index) => {
           const current = !done && index === context.current;
           const trigger = context.finalRoundBy === index;
@@ -40,6 +64,7 @@ export function Scoreboard({ context, done, table, presence, rulesOpen, onToggle
           return (
             <li
               key={index}
+              data-seat={index}
               className={`fk-player${current ? " fk-player--current" : ""}${you ? " fk-player--you" : ""}`}
               aria-current={current ? "true" : undefined}
             >
