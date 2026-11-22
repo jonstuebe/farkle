@@ -17,7 +17,8 @@
  *   useThrowSettled()(seq). If useSnapCount() changes, seat the dice from context immediately.
  *
  *   Replay (HUD): const { replaying, fed, total, skip } = useReplay();
- *   Seats: useMySeats() -> seats this device plays (all of them locally);
+ *   Seats: useMySeats() -> seats this device plays (all of them locally, bots excluded);
+ *          useBotSeats() -> seats the computer plays (games against bots);
  *          useSeatPresence() -> online per-seat connected flags (null locally).
  *   Session: useGameSession() -> { kind: "local" | "online", connected, gameNumber }.
  *
@@ -120,6 +121,10 @@ export function useReplay() {
 }
 
 export const useMySeats = () => useSessionState((s) => s.mySeats);
+
+const NO_BOTS: readonly number[] = [];
+/** Seats the computer plays (local games against bots); empty otherwise. */
+export const useBotSeats = () => useSessionState((s) => s.input.bots ?? NO_BOTS);
 
 /** Online: per-seat "connected right now" flags. Null for local games. */
 export const useSeatPresence = () => useSessionState((s) => s.presence);

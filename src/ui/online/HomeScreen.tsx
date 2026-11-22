@@ -14,7 +14,10 @@ interface HomeScreenProps {
   name: string | null;
   /** A local game that can be resumed, shown as a hint on the "this device" button. */
   localGame: SavedGameSummary | null;
+  /** A game against bots that can be resumed. */
+  botGame: SavedGameSummary | null;
   onLocal: () => void;
+  onBots: () => void;
   onHost: () => void;
   onJoin: () => void;
   onOpenRoom: (code: string) => void;
@@ -75,7 +78,18 @@ function describeSummary(summary: RoomSummary): RoomLine {
 }
 
 /** First screen: play here, start or join an online game, and pick up online games in progress. */
-export function HomeScreen({ deviceId, name, localGame, onLocal, onHost, onJoin, onOpenRoom, onEditName }: HomeScreenProps) {
+export function HomeScreen({
+  deviceId,
+  name,
+  localGame,
+  botGame,
+  onLocal,
+  onBots,
+  onHost,
+  onJoin,
+  onOpenRoom,
+  onEditName,
+}: HomeScreenProps) {
   const [rooms, setRooms] = useState<SavedRoom[]>(() => loadSavedRooms());
   const summaries = useRoomSummaries(
     rooms.map((room) => room.code),
@@ -97,9 +111,10 @@ export function HomeScreen({ deviceId, name, localGame, onLocal, onHost, onJoin,
     setAnnouncement(`Game ${code} removed from your list.`);
   };
 
-  const localHint = localGame
-    ? `Game in progress: ${localGame.players.map((p) => `${p.name} ${formatScore(p.score)}`).join(" · ")}`
-    : "Pass one phone or tablet around the table";
+  const inProgress = (game: SavedGameSummary) =>
+    `Game in progress: ${game.players.map((p) => `${p.name} ${formatScore(p.score)}`).join(" · ")}`;
+  const localHint = localGame ? inProgress(localGame) : "Pass one phone or tablet around the table";
+  const botHint = botGame ? inProgress(botGame) : "Take on 1 to 7 computer players";
 
   return (
     <Screen>
@@ -107,6 +122,10 @@ export function HomeScreen({ deviceId, name, localGame, onLocal, onHost, onJoin,
         <button type="button" className="online__choice online__choice--primary" onClick={onLocal}>
           <span className="online__choice-title">Play on this device</span>
           <span className="online__choice-hint">{localHint}</span>
+        </button>
+        <button type="button" className="online__choice" onClick={onBots}>
+          <span className="online__choice-title">Play against bots</span>
+          <span className="online__choice-hint">{botHint}</span>
         </button>
         <button type="button" className="online__choice" onClick={onHost}>
           <span className="online__choice-title">Start an online game</span>

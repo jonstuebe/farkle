@@ -144,7 +144,7 @@ export function Dock({ view, send, table, canAct, connected, currentAway, replay
       <ComboTip view={view} active={mode === "act"} />
       <section className={`fk-panel fk-turn${farkled ? " fk-turn--farkled" : ""}`} aria-label="Current turn">
         <div className="fk-turn__who">
-          <span className="fk-turn__name">{table.online ? turnTitle(view, table) : player?.name}</span>
+          <span className="fk-turn__name">{table.seated ? turnTitle(view, table) : player?.name}</span>
           <span className={`fk-turn__hint fk-turn__hint--${hint.tone}`}>{hint.text}</span>
         </div>
         <dl className="fk-stats">

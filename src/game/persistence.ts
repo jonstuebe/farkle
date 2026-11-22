@@ -24,6 +24,9 @@ export const SAVE_KEY = "farkle.save.v2";
 /** Version-1 saves (xstate snapshots) can't be converted to a log; they are just removed. */
 const LEGACY_SAVE_KEY = "farkle.save.v1";
 export const PREFS_KEY = "farkle.setup.v1";
+/** Games against bots have their own save and setup preferences, apart from pass-and-play. */
+export const BOT_SAVE_KEY = "farkle.save.bots.v1";
+export const BOT_PREFS_KEY = "farkle.setup.bots.v1";
 export const MAX_PLAYERS = 8;
 
 /** The subset of `Storage` used here, so tests can pass a plain in-memory object. */
@@ -96,6 +99,11 @@ function isValidInput(v: unknown): v is GameInput {
   if (!isRecord(v) || !Array.isArray(v.players)) return false;
   if (v.players.length < 1 || v.players.length > MAX_PLAYERS) return false;
   if (!v.players.every((name) => typeof name === "string" && name.length > 0)) return false;
+  if (v.bots !== undefined) {
+    const seats = v.players.length;
+    if (!Array.isArray(v.bots) || !v.bots.every((seat) => isCount(seat) && seat < seats)) return false;
+    if (new Set(v.bots).size !== v.bots.length) return false;
+  }
   if (v.rules === undefined) return true;
   if (!isRecord(v.rules)) return false;
   const { targetScore, entryThreshold } = v.rules;
@@ -160,17 +168,17 @@ export function serializeGame(state: Pick<SessionState, "input" | "log">, now: n
 }
 
 /** The saved in-progress game, if there is a usable one. Unusable data is deleted. */
-export function loadSavedGame(store: KeyValueStore | null = defaultStore()): SavedGame | null {
+export function loadSavedGame(store: KeyValueStore | null = defaultStore(), key: string = SAVE_KEY): SavedGame | null {
   remove(store, LEGACY_SAVE_KEY);
-  const raw = read(store, SAVE_KEY);
+  const raw = read(store, key);
   if (raw === null) return null;
   const saved = parseSavedGame(raw);
-  if (!saved) remove(store, SAVE_KEY);
+  if (!saved) remove(store, key);
   return saved;
 }
 
-export function clearSavedGame(store: KeyValueStore | null = defaultStore()): void {
-  remove(store, SAVE_KEY);
+export function clearSavedGame(store: KeyValueStore | null = defaultStore(), key: string = SAVE_KEY): void {
+  remove(store, key);
 }
 
 export function summarizeSavedGame(saved: SavedGame): SavedGameSummary {
@@ -188,17 +196,21 @@ export function summarizeSavedGame(saved: SavedGame): SavedGameSummary {
  * Keep the save in step with a local session: writes now and after every change, and clears
  * the save once the game is over. Returns an unsubscribe function.
  */
-export function persistSession(session: GameSession, store: KeyValueStore | null = defaultStore()): () => void {
+export function persistSession(
+  session: GameSession,
+  store: KeyValueStore | null = defaultStore(),
+  key: string = SAVE_KEY,
+): () => void {
   let last: string | null = null;
   const sync = () => {
     const state = session.getState();
     const json = serializeGame(state);
     if (json === null) {
-      clearSavedGame(store);
+      clearSavedGame(store, key);
       last = null;
       return;
     }
-    if (json !== last && write(store, SAVE_KEY, json)) last = json;
+    if (json !== last && write(store, key, json)) last = json;
   };
   sync();
   return session.subscribe(sync);
@@ -212,6 +224,8 @@ export interface SetupPrefs {
   players: string[];
   targetScore: number;
   entryThreshold: number;
+  /** Bot games: how many bots (`players` then holds just the person's name). */
+  bots?: number;
 }
 
 export const DEFAULT_PREFS: SetupPrefs = {
@@ -224,10 +238,13 @@ export const MIN_TARGET_SCORE = 500;
 export const MAX_TARGET_SCORE = 100_000;
 export const MAX_NAME_LENGTH = 16;
 
-export function loadSetupPrefs(store: KeyValueStore | null = defaultStore()): SetupPrefs {
-  const fallback = { ...DEFAULT_PREFS, players: [...DEFAULT_PREFS.players] };
+export const DEFAULT_BOT_PREFS: SetupPrefs = { ...DEFAULT_PREFS, players: ["You"], bots: 1 };
+
+export function loadSetupPrefs(store: KeyValueStore | null = defaultStore(), key: string = PREFS_KEY): SetupPrefs {
+  const defaults = key === BOT_PREFS_KEY ? DEFAULT_BOT_PREFS : DEFAULT_PREFS;
+  const fallback = { ...defaults, players: [...defaults.players] };
   try {
-    const data: unknown = JSON.parse(read(store, PREFS_KEY) ?? "null");
+    const data: unknown = JSON.parse(read(store, key) ?? "null");
     if (!isRecord(data)) return fallback;
     const players = Array.isArray(data.players)
       ? data.players
@@ -242,12 +259,15 @@ export function loadSetupPrefs(store: KeyValueStore | null = defaultStore()): Se
       players: players.length > 0 ? players : fallback.players,
       targetScore: targetOk ? target : fallback.targetScore,
       entryThreshold: isCount(data.entryThreshold) ? data.entryThreshold : fallback.entryThreshold,
+      ...(fallback.bots === undefined
+        ? {}
+        : { bots: isCount(data.bots) && data.bots >= 1 && data.bots < MAX_PLAYERS ? data.bots : fallback.bots }),
     };
   } catch {
     return fallback;
   }
 }
 
-export function saveSetupPrefs(prefs: SetupPrefs, store: KeyValueStore | null = defaultStore()): void {
-  write(store, PREFS_KEY, JSON.stringify(prefs));
+export function saveSetupPrefs(prefs: SetupPrefs, store: KeyValueStore | null = defaultStore(), key: string = PREFS_KEY): void {
+  write(store, key, JSON.stringify(prefs));
 }

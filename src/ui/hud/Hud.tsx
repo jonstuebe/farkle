@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   useAppActions,
+  useBotSeats,
   useCanAct,
   useGameActor,
   useGameIntent,
@@ -49,13 +50,19 @@ export function Hud({ onNewGame }: HudProps) {
   const { playAgain } = useAppActions();
   const session = useGameSession();
   const mySeats = useMySeats();
+  const bots = useBotSeats();
   const presence = useSeatPresence();
   const replay = useReplay();
   const snapCount = useSnapCount();
   const [rulesOpen, setRulesOpen] = useState(false);
 
   const online = session.kind === "online";
-  const table = useMemo<Table>(() => ({ online, mySeats }), [online, mySeats]);
+  const playerCount = snapshot.context.players.length;
+  // Against bots this device has one seat, like online: the bots' turns are watched.
+  const table = useMemo<Table>(
+    () => ({ online, seated: online || mySeats.length < playerCount, mySeats, bots }),
+    [online, mySeats, bots, playerCount],
+  );
   const names = useMemo(() => view.context.players.map((p) => p.name), [view.context.players]);
   const reactions = useReactionFloats(online ? (mySeats[0] ?? null) : null, names);
   const banners = useBanners(actor, { table, replaying: replay.replaying, snapCount });

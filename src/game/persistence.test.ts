@@ -4,6 +4,9 @@ import type { GameInput } from "./machine";
 import { applyIntent, replayLog, type Intent, type LogEntry } from "./log";
 import { createLocalSession } from "./session";
 import {
+  BOT_PREFS_KEY,
+  BOT_SAVE_KEY,
+  DEFAULT_BOT_PREFS,
   DEFAULT_PREFS,
   PREFS_KEY,
   SAVE_KEY,
@@ -211,5 +214,40 @@ describe("setup preferences", () => {
     const prefs = loadSetupPrefs(store);
     expect(prefs.players).toHaveLength(8);
     expect(prefs.players.every((n) => n.length <= 16)).toBe(true);
+  });
+});
+
+describe("games against bots", () => {
+  const BOT_INPUT: GameInput = { players: ["You", "Ada", "Basil"], bots: [1, 2] };
+  const botLog = () => buildLog(BOT_INPUT, [[{ type: "roll" }, [1, 2, 3, 4, 6, 6]]]);
+
+  test("are saved in their own slot, bots included", () => {
+    const store = new MemoryStore();
+    const session = createLocalSession({ input: BOT_INPUT, log: botLog() });
+    const stop = persistSession(session, store, BOT_SAVE_KEY);
+    expect(store.getItem(SAVE_KEY)).toBeNull();
+    expect(loadSavedGame(store)).toBeNull();
+    expect(loadSavedGame(store, BOT_SAVE_KEY)?.input.bots).toEqual([1, 2]);
+    clearSavedGame(store, BOT_SAVE_KEY);
+    expect(store.getItem(BOT_SAVE_KEY)).toBeNull();
+    stop();
+  });
+
+  test("bad bot seats are discarded", () => {
+    for (const bots of [[3], [1, 1], ["1"], "1"]) {
+      const json = JSON.stringify({ version: SAVE_VERSION, savedAt: 0, input: { ...BOT_INPUT, bots }, log: botLog() });
+      expect(parseSavedGame(json)).toBeNull();
+    }
+  });
+
+  test("remember the name and bot count apart from pass-and-play", () => {
+    const store = new MemoryStore();
+    expect(loadSetupPrefs(store, BOT_PREFS_KEY)).toEqual(DEFAULT_BOT_PREFS);
+    const prefs = { players: ["Jo"], targetScore: 5000, entryThreshold: 0, bots: 3 };
+    saveSetupPrefs(prefs, store, BOT_PREFS_KEY);
+    expect(loadSetupPrefs(store, BOT_PREFS_KEY)).toEqual(prefs);
+    expect(loadSetupPrefs(store)).toEqual(DEFAULT_PREFS);
+    store.setItem(BOT_PREFS_KEY, JSON.stringify({ ...prefs, bots: 9 }));
+    expect(loadSetupPrefs(store, BOT_PREFS_KEY).bots).toBe(1);
   });
 });

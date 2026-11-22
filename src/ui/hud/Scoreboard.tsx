@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import type { GameContext } from "../../game/machine";
-import { finalRoundInfo, finalRoundText, formatPoints, isYou, type Table } from "./logic";
+import { finalRoundInfo, finalRoundText, formatPoints, isBot, isYou, type Table } from "./logic";
 
 export interface ScoreboardProps {
   context: GameContext;
@@ -77,7 +77,8 @@ export function Scoreboard({ context, done, table, presence, rulesOpen, onToggle
                 />
               )}
               <span className="fk-player__name">{player.name}</span>
-              {you && <span className="fk-player__you">You</span>}
+              {you ? <span className="fk-player__you">You</span> : null}
+              {isBot(table, index) ? <span className="fk-player__you fk-player__bot">Bot</span> : null}
               {trigger && (
                 <span className="fk-player__flag" title="Reached the target score">
                   ★

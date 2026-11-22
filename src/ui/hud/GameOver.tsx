@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Player } from "../../game/machine";
-import { formatPoints, gameOverLabels, isYou, onlineWinnerHeadline, rankPlayers, type Table } from "./logic";
+import { formatPoints, gameOverLabels, isBot, isYou, onlineWinnerHeadline, rankPlayers, type Table } from "./logic";
 
 export interface GameOverProps {
   players: readonly Player[];
@@ -73,7 +73,8 @@ export function GameOver({ players, winners, table, connected, onPlayAgain, onNe
                 <span className="fk-rank__place">{player.rank}</span>
                 <span className="fk-rank__name">
                   {player.name}
-                  {isYou(table, player.index) && <span className="fk-player__you">You</span>}
+                  {isYou(table, player.index) ? <span className="fk-player__you">You</span> : null}
+                  {isBot(table, player.index) ? <span className="fk-player__you fk-player__bot">Bot</span> : null}
                   {won && <span className="fk-sr"> (winner)</span>}
                 </span>
                 <span className="fk-rank__score">{formatPoints(player.score)}</span>

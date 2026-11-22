@@ -1,6 +1,15 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { GameInput } from "./game/machine";
-import { clearSavedGame, loadSavedGame, persistSession, summarizeSavedGame, type SavedGame } from "./game/persistence";
+import {
+  BOT_SAVE_KEY,
+  SAVE_KEY,
+  clearSavedGame,
+  loadSavedGame,
+  persistSession,
+  summarizeSavedGame,
+  type SavedGame,
+} from "./game/persistence";
+import { driveBots } from "./game/bot";
 import { AppActionsContext, GameProvider, type AppActions } from "./game/react";
 import { createLocalSession, type GameSession } from "./game/session";
 import { replayLog } from "./game/log";
@@ -46,7 +55,7 @@ function useSceneReady(): boolean {
 
 /**
  * Screens, by route (see ./net/routes.ts):
- *   /          home, and under it (history state) local play and the join form
+ *   /          home, and under it (history state) local play, play against bots and the join form
  *   /r/CODE    an online room: naming (first time), lobby, then the game
  */
 const router: Router = createRouter(window);
@@ -60,7 +69,11 @@ export function App() {
   const [editingName, setEditingName] = useState(false);
   // Read again whenever home is shown, so a local game played since then is offered.
   const localGame = useMemo(() => {
-    const saved = route.kind === "home" ? resumableGame() : null;
+    const saved = route.kind === "home" ? resumableGame(SAVE_KEY) : null;
+    return saved ? summarizeSavedGame(saved) : null;
+  }, [route]);
+  const botGame = useMemo(() => {
+    const saved = route.kind === "home" ? resumableGame(BOT_SAVE_KEY) : null;
     return saved ? summarizeSavedGame(saved) : null;
   }, [route]);
 
@@ -107,7 +120,9 @@ export function App() {
           deviceId={deviceId}
           name={name}
           localGame={localGame}
+          botGame={botGame}
           onLocal={() => router.push({ kind: "local" })}
+          onBots={() => router.push({ kind: "bots" })}
           onHost={() => router.push({ kind: "room", code: newRoomCode(), host: true })}
           onJoin={() => router.push({ kind: "join" })}
           onOpenRoom={(code) => router.push({ kind: "room", code, host: false })}
@@ -116,7 +131,9 @@ export function App() {
       );
       break;
     case "local":
-      screen = <LocalPlay onHome={goHome} />;
+    case "bots":
+      // Keyed so switching between the two never carries one's game into the other.
+      screen = <LocalPlay key={route.kind} mode={route.kind} name={name} onHome={goHome} />;
       break;
     case "join":
       // Replace, so Back from the room goes home rather than to a stale form.
@@ -150,7 +167,8 @@ export function App() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Local pass-and-play: setup screen, then the game (saved in localStorage as it goes)
+// On this device (pass-and-play, or against bots): setup screen, then the game (saved in
+// localStorage as it goes, each mode in its own slot)
 // ---------------------------------------------------------------------------------------------
 
 /**
@@ -158,10 +176,10 @@ export function App() {
  * and with at least one move. A game nobody has rolled in yet is just its settings, and offering
  * to "resume" it after the player chose New game reads as if their game hadn't ended.
  */
-function resumableGame(): SavedGame | null {
-  const saved = loadSavedGame();
+function resumableGame(key: string): SavedGame | null {
+  const saved = loadSavedGame(undefined, key);
   if (saved && saved.log.length === 0) {
-    clearSavedGame();
+    clearSavedGame(undefined, key);
     return null;
   }
   return saved;
@@ -173,9 +191,17 @@ type LocalScreen =
 
 let nextGameId = 1;
 
-function LocalPlay({ onHome }: { onHome: () => void }) {
+interface LocalPlayProps {
+  mode: "local" | "bots";
+  /** The online name, if any: the default name for the person's seat against bots. */
+  name: string | null;
+  onHome: () => void;
+}
+
+function LocalPlay({ mode, name, onHome }: LocalPlayProps) {
+  const saveKey = mode === "bots" ? BOT_SAVE_KEY : SAVE_KEY;
   const [screen, setScreen] = useState<LocalScreen>({ kind: "setup" });
-  const [saved, setSaved] = useState<SavedGame | null>(() => resumableGame());
+  const [saved, setSaved] = useState<SavedGame | null>(() => resumableGame(saveKey));
 
   // Session + presenter are created in event handlers (never during render, so StrictMode can't
   // double them) and the previous game's presenter is stopped when the screen changes.
@@ -209,22 +235,22 @@ function LocalPlay({ onHome }: { onHome: () => void }) {
 
   const start = useCallback(
     (input: GameInput) => {
-      clearSavedGame();
+      clearSavedGame(undefined, saveKey);
       setSaved(null);
       open(input);
     },
-    [open],
+    [open, saveKey],
   );
 
   const resume = useCallback(() => {
-    const game = resumableGame();
+    const game = resumableGame(saveKey);
     if (!game) {
-      clearSavedGame();
+      clearSavedGame(undefined, saveKey);
       setSaved(null);
       return;
     }
     open(game.input, game);
-  }, [open]);
+  }, [open, saveKey]);
 
   const newGame = useCallback(() => {
     // A game that is still running was saved on its last change; offer it back on the setup
@@ -233,11 +259,11 @@ function LocalPlay({ onHome }: { onHome: () => void }) {
     const previous = current.current;
     if (previous.kind === "playing") {
       const { input, log } = previous.session.getState();
-      if (replayLog(input, log).status !== "active") clearSavedGame();
+      if (replayLog(input, log).status !== "active") clearSavedGame(undefined, saveKey);
     }
-    setSaved(resumableGame());
+    setSaved(resumableGame(saveKey));
     show({ kind: "setup" });
-  }, [show]);
+  }, [show, saveKey]);
 
   const currentInput = screen.kind === "playing" ? screen.input : null;
   const actions = useMemo<AppActions>(
@@ -247,9 +273,26 @@ function LocalPlay({ onHome }: { onHome: () => void }) {
   const savedSummary = useMemo(() => (saved ? summarizeSavedGame(saved) : null), [saved]);
 
   if (screen.kind === "setup") {
-    return <SetupScreen onStart={start} savedGame={savedSummary} onResume={resume} onBack={onHome} />;
+    return (
+      <SetupScreen
+        mode={mode}
+        onlineName={name}
+        onStart={start}
+        savedGame={savedSummary}
+        onResume={resume}
+        onBack={onHome}
+      />
+    );
   }
-  return <GameView key={screen.gameId} session={screen.session} presenter={screen.presenter} actions={actions} />;
+  return (
+    <GameView
+      key={screen.gameId}
+      session={screen.session}
+      presenter={screen.presenter}
+      actions={actions}
+      saveKey={saveKey}
+    />
+  );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -266,12 +309,19 @@ interface GameViewProps {
   session: GameSession;
   presenter: Presenter;
   actions: AppActions;
+  /** Local games: where the game is saved as it goes. */
+  saveKey?: string;
 }
 
-function GameView({ session, presenter, actions }: GameViewProps) {
+function GameView({ session, presenter, actions, saveKey = SAVE_KEY }: GameViewProps) {
   const sceneReady = useSceneReady();
   // Mirror a local game into localStorage for as long as this view is mounted.
-  useEffect(() => (session.kind === "local" ? persistSession(session) : undefined), [session]);
+  useEffect(
+    () => (session.kind === "local" ? persistSession(session, undefined, saveKey) : undefined),
+    [session, saveKey],
+  );
+  // Bots play their seats (if the game has any) at the pace of what is on screen.
+  useEffect(() => (session.kind === "local" ? driveBots(session, presenter) : undefined), [session, presenter]);
 
   return (
     <AppActionsContext.Provider value={actions}>

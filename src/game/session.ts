@@ -56,11 +56,12 @@ export interface LocalSessionOptions {
   onChange?: (state: SessionState) => void;
 }
 
-/** Pass-and-play on one device. */
+/** Pass-and-play on one device. Seats listed in `input.bots` are not "mine": a bot plays them (./bot.ts). */
 export function createLocalSession({ input, log = [], gameNumber = 1, onChange }: LocalSessionOptions): GameSession {
   const listeners = new Set<() => void>();
-  const allSeats = input.players.map((_, i) => i);
-  let state: SessionState = { gameNumber, input, log, mySeats: allSeats, seenFrom: log.length, connected: true, presence: null };
+  const bots = new Set(input.bots ?? []);
+  const mySeats = input.players.flatMap((_, i) => (bots.has(i) ? [] : [i]));
+  let state: SessionState = { gameNumber, input, log, mySeats, seenFrom: log.length, connected: true, presence: null };
   let snapshot = replayLog(input, log);
 
   const commit = (next: SessionState) => {
