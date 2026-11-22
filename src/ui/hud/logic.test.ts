@@ -362,7 +362,7 @@ describe("scoringRows", () => {
 
 describe("online play", () => {
   // This device is Bo (seat 1) in a three-player online game.
-  const me: Table = { online: true, mySeats: [1] };
+  const me: Table = { online: true, seated: true, bots: [], mySeats: [1] };
   const game = () => startGame({ players: ["Ada", "Bo", "Cy"] });
   const passTurn = (g: ReturnType<typeof game>) => {
     g.roll(2, 3, 4, 6, 6, 2);
@@ -372,7 +372,7 @@ describe("online play", () => {
   test("only my online seat is 'You'; local seats never are", () => {
     expect(isYou(me, 1)).toBe(true);
     expect(isYou(me, 0)).toBe(false);
-    expect(isYou({ online: false, mySeats: [0, 1, 2] }, 1)).toBe(false);
+    expect(isYou({ online: false, seated: false, bots: [], mySeats: [0, 1, 2] }, 1)).toBe(false);
     expect(isYou(LOCAL_TABLE, 0)).toBe(false);
     expect(seatLabel("Bo", 1, me)).toBe("You");
     expect(seatLabel("Ada", 0, me)).toBe("Ada");
@@ -427,11 +427,11 @@ describe("online play", () => {
   });
 
   test("how long until my turn", () => {
-    const cy: Table = { online: true, mySeats: [2] };
+    const cy: Table = { online: true, seated: true, bots: [], mySeats: [2] };
     const g = game();
     expect(upNextText(g.view(), cy)).toBe("You're up in 2 turns");
     expect(upNextText(g.view(), me)).toBe("You're up next");
-    expect(upNextText(g.view(), { online: true, mySeats: [0] })).toBeNull();
+    expect(upNextText(g.view(), { online: true, seated: true, bots: [], mySeats: [0] })).toBeNull();
     expect(upNextText(g.view(), LOCAL_TABLE)).toBeNull();
   });
 
@@ -443,8 +443,8 @@ describe("online play", () => {
     g.select(0, 1, 2);
     g.send({ type: "bank" });
     expect(upNextText(g.view(), me)).toBe("Final round: you've had your last turn");
-    expect(upNextText(g.view(), { online: true, mySeats: [0] })).toBe("You're up next");
-    expect(upNextText(g.view(), { online: true, mySeats: [2] })).toBeNull();
+    expect(upNextText(g.view(), { online: true, seated: true, bots: [], mySeats: [0] })).toBe("You're up next");
+    expect(upNextText(g.view(), { online: true, seated: true, bots: [], mySeats: [2] })).toBeNull();
   });
 
   test("the HUD's burst detection relies on one snapshot per event", () => {

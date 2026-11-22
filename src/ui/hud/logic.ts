@@ -298,19 +298,28 @@ export function scoringRows(table: ScoringTable): ScoringRow[] {
 
 /** Who is at the table from this device's point of view. */
 export interface Table {
-  /** Online games give this device one seat; locally every seat is "mine". */
+  /** Played over the network (rematch requests, reconnecting). */
   online: boolean;
+  /**
+   * This device plays only `mySeats` (online, or against bots), so the others are watched and
+   * "You" is one of the seats. In pass-and-play every seat is "mine" and this is false.
+   */
+  seated: boolean;
   mySeats: readonly number[];
+  /** Seats the computer plays. */
+  bots: readonly number[];
 }
 
-export const LOCAL_TABLE: Table = { online: false, mySeats: [] };
+export const LOCAL_TABLE: Table = { online: false, seated: false, mySeats: [], bots: [] };
 
-/** A seat this device plays in an online game (the one to call "You"). */
-export const isYou = (table: Table, seat: number): boolean => table.online && table.mySeats.includes(seat);
+/** A seat this device plays when it has its own seat (online or against bots): the one to call "You". */
+export const isYou = (table: Table, seat: number): boolean => table.seated && table.mySeats.includes(seat);
 
-/** True when the HUD should offer actions for the current player: always locally, my seat online. */
+export const isBot = (table: Table, seat: number): boolean => table.bots.includes(seat);
+
+/** True when the HUD should offer actions for the current player: always in pass-and-play, else my seat. */
 export const isMyTurn = ({ phase, context }: HudView, table: Table): boolean =>
-  phase !== "done" && (!table.online || table.mySeats.includes(context.current));
+  phase !== "done" && (!table.seated || table.mySeats.includes(context.current));
 
 const currentName = (ctx: GameContext): string => ctx.players[ctx.current]?.name ?? "Someone";
 
@@ -372,7 +381,7 @@ function seatsStillToPlay(ctx: GameContext): number[] {
 
 /** For the player who is waiting online: how far away their turn is. Null when it is their turn. */
 export function upNextText({ phase, context: ctx }: HudView, table: Table): string | null {
-  if (phase === "done" || !table.online) return null;
+  if (phase === "done" || !table.seated) return null;
   const waits = table.mySeats
     .map((seat) => seatsStillToPlay(ctx).indexOf(seat))
     .filter((turns) => turns >= 0);
@@ -413,7 +422,7 @@ export const seatLabel = (name: string, seat: number, table: Table): string => (
 
 /** Game-over headline from this device's seat: "You win!", "You and Bo tie!", "Bo wins!". */
 export function onlineWinnerHeadline(players: readonly Player[], winnerIndices: readonly number[], table: Table): string {
-  if (!table.online) return winnerHeadline(players, winnerIndices);
+  if (!table.seated) return winnerHeadline(players, winnerIndices);
   // "You" first reads best: "You and Bo tie!"
   const ordered = [...winnerIndices].sort((a, b) => Number(isYou(table, b)) - Number(isYou(table, a)));
   const names = ordered.map((i) => seatLabel(players[i]?.name ?? "", i, table));

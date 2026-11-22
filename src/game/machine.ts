@@ -58,6 +58,8 @@ export interface GameContext {
 export interface GameInput {
   players: string[];
   rules?: Partial<GameRules>;
+  /** Seats played by the computer (local games against bots). The machine itself ignores this. */
+  bots?: number[];
 }
 
 export interface GameOutput {

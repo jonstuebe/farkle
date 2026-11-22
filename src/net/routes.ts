@@ -2,7 +2,7 @@
  * Routing with the History API (no router dependency).
  *
  * Two URLs exist: `/` and `/r/CODE` (a room: lobby or game; also the invite link). The screens
- * that live under `/` (home, local play, join) are told apart by `history.state.view`, so the
+ * that live under `/` (home, local play, bot play, join) are told apart by `history.state.view`, so the
  * back button walks through them without them needing shareable URLs.
  */
 import { roomCodeFromPath, roomPath } from "./protocol";
@@ -11,6 +11,8 @@ export type Route =
   | { kind: "home" }
   /** Pass-and-play on this device: setup screen and the local game. */
   | { kind: "local" }
+  /** Against the computer on this device: setup screen and the game. */
+  | { kind: "bots" }
   | { kind: "join" }
   /** `host`: this device is creating the room (it picked the code). */
   | { kind: "room"; code: string; host: boolean };
@@ -27,6 +29,7 @@ export function parseRoute(pathname: string, state: unknown = null): Route {
   if (code) return { kind: "room", code, host: info.host === true };
   if (pathname === "/" || pathname === "") {
     if (info.view === "local") return { kind: "local" };
+    if (info.view === "bots") return { kind: "bots" };
     if (info.view === "join") return { kind: "join" };
   }
   return { kind: "home" };
@@ -41,6 +44,7 @@ export function routeState(route: Route): HistoryState | null {
     case "home":
       return null;
     case "local":
+    case "bots":
     case "join":
       return { view: route.kind };
     case "room":

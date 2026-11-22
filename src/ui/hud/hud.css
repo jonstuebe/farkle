@@ -300,6 +300,10 @@
     display: none;
   }
 
+  .fk-players .fk-player__bot {
+    display: none;
+  }
+
   .fk-players .fk-player--you .fk-player__you {
     flex: 1;
     padding: 0;

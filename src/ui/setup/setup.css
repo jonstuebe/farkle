@@ -315,6 +315,10 @@
   border: 1px solid var(--line);
 }
 
+.setup__segments--bots {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
 .setup__segment {
   position: relative;
   cursor: pointer;

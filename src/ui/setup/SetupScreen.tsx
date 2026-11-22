@@ -1,8 +1,11 @@
 import { useEffect, useId, useMemo, useRef, useState, type SubmitEvent } from "react";
 import type { GameInput } from "../../game/machine";
+import { MAX_BOTS, botNames } from "../../game/bot";
 import {
+  BOT_PREFS_KEY,
   MAX_NAME_LENGTH,
   MAX_PLAYERS,
+  PREFS_KEY,
   MAX_TARGET_SCORE,
   MIN_TARGET_SCORE,
   loadSetupPrefs,
@@ -13,6 +16,10 @@ import { Screen } from "./Brand";
 import "./setup.css";
 
 export interface SetupScreenProps {
+  /** Pass-and-play (a roster of names) or against bots (the person's name and a bot count). */
+  mode?: "local" | "bots";
+  /** Against bots: the online name, used for the person's seat until they pick another. */
+  onlineName?: string | null;
   onStart: (input: GameInput) => void;
   /** An in-progress game found in storage; shows the "Resume game" card when set. */
   savedGame?: SavedGameSummary | null;
@@ -60,11 +67,25 @@ export function validateTarget(raw: string): string | null {
   return null;
 }
 
-/** Pre-game screen: roster, target score, entry threshold, and resume of a saved game. */
-export function SetupScreen({ onStart, savedGame, onResume, onBack }: SetupScreenProps) {
-  const prefs = useMemo(() => loadSetupPrefs(), []);
+const BOT_COUNTS = Array.from({ length: MAX_BOTS }, (_, i) => i + 1);
+/** The name the person's seat gets against bots until they choose one. */
+const DEFAULT_BOT_OPPONENT_NAME = "You";
+
+/** Pre-game screen: roster (or name and bots), target score, entry threshold, and resume of a saved game. */
+export function SetupScreen({ mode = "local", onlineName = null, onStart, savedGame, onResume, onBack }: SetupScreenProps) {
+  const vsBots = mode === "bots";
+  const prefsKey = vsBots ? BOT_PREFS_KEY : PREFS_KEY;
+  const prefs = useMemo(() => {
+    const loaded = loadSetupPrefs(undefined, prefsKey);
+    if (!vsBots) return loaded;
+    // Against bots the roster is just the person: their saved name, else their online name.
+    const saved = loaded.players[0];
+    const name = saved && saved !== DEFAULT_BOT_OPPONENT_NAME ? saved : (onlineName ?? DEFAULT_BOT_OPPONENT_NAME);
+    return { ...loaded, players: [name.slice(0, MAX_NAME_LENGTH)] };
+  }, [prefsKey, vsBots, onlineName]);
   const nextId = useRef(prefs.players.length);
   const [players, setPlayers] = useState<PlayerRow[]>(() => prefs.players.map((name, id) => ({ id, name })));
+  const [botCount, setBotCount] = useState(prefs.bots ?? 1);
   const isPreset = (TARGET_PRESETS as readonly number[]).includes(prefs.targetScore);
   const [targetMode, setTargetMode] = useState<"preset" | "custom">(isPreset ? "preset" : "custom");
   const [preset, setPreset] = useState<number>(isPreset ? prefs.targetScore : 10_000);
@@ -138,7 +159,18 @@ export function SetupScreen({ onStart, savedGame, onResume, onBack }: SetupScree
     const roster = names.map((n) => n.trim());
     const targetScore = targetMode === "custom" ? Number(customTarget) : preset;
     const entryThreshold = entryOn ? ENTRY_THRESHOLD : 0;
-    saveSetupPrefs({ players: roster, targetScore, entryThreshold });
+    if (vsBots) {
+      saveSetupPrefs({ players: roster, targetScore, entryThreshold, bots: botCount }, undefined, prefsKey);
+      // The person always rolls first; the bots take the seats after them.
+      const bots = botNames(botCount, roster);
+      onStart({
+        players: [...roster, ...bots],
+        rules: { targetScore, entryThreshold },
+        bots: bots.map((_, i) => roster.length + i),
+      });
+      return;
+    }
+    saveSetupPrefs({ players: roster, targetScore, entryThreshold }, undefined, prefsKey);
     onStart({ players: roster, rules: { targetScore, entryThreshold } });
   };
 
@@ -177,72 +209,88 @@ export function SetupScreen({ onStart, savedGame, onResume, onBack }: SetupScree
 
         <form className="setup__card" onSubmit={submit} noValidate aria-labelledby={`${uid}-new`}>
           <h2 id={`${uid}-new`} className="setup__heading">
-            {savedGame ? "Or start a new game" : "New game"}
+            {savedGame ? "Or start a new game" : vsBots ? "New game against bots" : "New game"}
           </h2>
 
-          <fieldset className="setup__group">
-            <legend className="setup__legend">
-              Players <span className="setup__meta">{players.length} of {MAX_PLAYERS}</span>
-            </legend>
-            <ol className="setup__players">
-              {players.map((p, i) => {
-                const error = shownNameErrors[i];
-                const errorId = `${uid}-err-${p.id}`;
-                return (
-                  <li key={p.id} className="setup__player">
-                    <span className="setup__seat" aria-hidden="true">
-                      {i + 1}
-                    </span>
-                    <input
-                      ref={(el) => {
-                        if (el) rowRefs.current.set(p.id, el);
-                        else rowRefs.current.delete(p.id);
-                      }}
-                      className="setup__input"
-                      type="text"
-                      value={p.name}
-                      maxLength={MAX_NAME_LENGTH}
-                      placeholder={`Player ${i + 1}`}
-                      aria-label={`Player ${i + 1} name`}
-                      aria-invalid={error ? true : undefined}
-                      aria-describedby={error ? errorId : undefined}
-                      autoComplete="off"
-                      autoCapitalize="words"
-                      spellCheck={false}
-                      enterKeyHint="done"
-                      onChange={(e) => rename(p.id, e.target.value)}
-                      onFocus={(e) => e.target.select()}
-                    />
-                    <button
-                      type="button"
-                      className="setup__icon-btn"
-                      onClick={() => removePlayer(p.id)}
-                      disabled={players.length <= 1}
-                      aria-label={`Remove ${p.name.trim() || `player ${i + 1}`}`}
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M6 6l12 12M18 6L6 18" />
-                      </svg>
-                    </button>
-                    {error ? (
-                      <p id={errorId} className="setup__error">
-                        {error}
-                      </p>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ol>
-            <button
-              ref={addRef}
-              type="button"
-              className="setup__btn setup__btn--ghost"
-              onClick={addPlayer}
-              disabled={players.length >= MAX_PLAYERS}
-            >
-              {players.length >= MAX_PLAYERS ? `${MAX_PLAYERS} players max` : "+ Add player"}
-            </button>
-          </fieldset>
+          {vsBots ? (
+            <BotFields
+              uid={uid}
+              row={players[0]!}
+              error={shownNameErrors[0] ?? null}
+              inputRef={(el) => {
+                const id = players[0]!.id;
+                if (el) rowRefs.current.set(id, el);
+                else rowRefs.current.delete(id);
+              }}
+              onRename={(name) => rename(players[0]!.id, name)}
+              botCount={botCount}
+              onBotCount={setBotCount}
+            />
+          ) : (
+            <fieldset className="setup__group">
+              <legend className="setup__legend">
+                Players <span className="setup__meta">{players.length} of {MAX_PLAYERS}</span>
+              </legend>
+              <ol className="setup__players">
+                {players.map((p, i) => {
+                  const error = shownNameErrors[i];
+                  const errorId = `${uid}-err-${p.id}`;
+                  return (
+                    <li key={p.id} className="setup__player">
+                      <span className="setup__seat" aria-hidden="true">
+                        {i + 1}
+                      </span>
+                      <input
+                        ref={(el) => {
+                          if (el) rowRefs.current.set(p.id, el);
+                          else rowRefs.current.delete(p.id);
+                        }}
+                        className="setup__input"
+                        type="text"
+                        value={p.name}
+                        maxLength={MAX_NAME_LENGTH}
+                        placeholder={`Player ${i + 1}`}
+                        aria-label={`Player ${i + 1} name`}
+                        aria-invalid={error ? true : undefined}
+                        aria-describedby={error ? errorId : undefined}
+                        autoComplete="off"
+                        autoCapitalize="words"
+                        spellCheck={false}
+                        enterKeyHint="done"
+                        onChange={(e) => rename(p.id, e.target.value)}
+                        onFocus={(e) => e.target.select()}
+                      />
+                      <button
+                        type="button"
+                        className="setup__icon-btn"
+                        onClick={() => removePlayer(p.id)}
+                        disabled={players.length <= 1}
+                        aria-label={`Remove ${p.name.trim() || `player ${i + 1}`}`}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M6 6l12 12M18 6L6 18" />
+                        </svg>
+                      </button>
+                      {error ? (
+                        <p id={errorId} className="setup__error">
+                          {error}
+                        </p>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ol>
+              <button
+                ref={addRef}
+                type="button"
+                className="setup__btn setup__btn--ghost"
+                onClick={addPlayer}
+                disabled={players.length >= MAX_PLAYERS}
+              >
+                {players.length >= MAX_PLAYERS ? `${MAX_PLAYERS} players max` : "+ Add player"}
+              </button>
+            </fieldset>
+          )}
 
           <fieldset className="setup__group">
             <legend className="setup__legend">Play to</legend>
@@ -323,5 +371,73 @@ export function SetupScreen({ onStart, savedGame, onResume, onBack }: SetupScree
           {announcement}
         </p>
     </Screen>
+  );
+}
+
+interface BotFieldsProps {
+  uid: string;
+  row: PlayerRow;
+  error: string | null;
+  inputRef: (el: HTMLInputElement | null) => void;
+  onRename: (name: string) => void;
+  botCount: number;
+  onBotCount: (count: number) => void;
+}
+
+/** Against bots: the person's name and how many bots to play. */
+function BotFields({ uid, row, error, inputRef, onRename, botCount, onBotCount }: BotFieldsProps) {
+  const opponents = botNames(botCount, [row.name]);
+  return (
+    <>
+      <fieldset className="setup__group">
+        <legend className="setup__legend">Your name</legend>
+        <div className="setup__custom">
+          <input
+            ref={inputRef}
+            className="setup__input"
+            type="text"
+            value={row.name}
+            maxLength={MAX_NAME_LENGTH}
+            placeholder={DEFAULT_BOT_OPPONENT_NAME}
+            aria-label="Your name"
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? `${uid}-name-err` : undefined}
+            autoComplete="off"
+            autoCapitalize="words"
+            spellCheck={false}
+            enterKeyHint="done"
+            onChange={(e) => onRename(e.target.value)}
+            onFocus={(e) => e.target.select()}
+          />
+          {error ? (
+            <p id={`${uid}-name-err`} className="setup__error">
+              {error}
+            </p>
+          ) : null}
+        </div>
+      </fieldset>
+
+      <fieldset className="setup__group">
+        <legend className="setup__legend">
+          Bots <span className="setup__meta">{botCount + 1} players in all</span>
+        </legend>
+        <div className="setup__segments setup__segments--bots">
+          {BOT_COUNTS.map((count) => (
+            <label key={count} className="setup__segment">
+              <input
+                type="radio"
+                name={`${uid}-bots`}
+                className="visually-hidden"
+                checked={botCount === count}
+                onChange={() => onBotCount(count)}
+                aria-label={`${count} ${count === 1 ? "bot" : "bots"}`}
+              />
+              <span aria-hidden="true">{count}</span>
+            </label>
+          ))}
+        </div>
+        <p className="setup__meta">You roll first, then {opponents.join(", ")}.</p>
+      </fieldset>
+    </>
   );
 }
