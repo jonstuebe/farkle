@@ -13,7 +13,7 @@ import {
   useSnapCount,
   useThrowSettled,
 } from "../game/react";
-import { Die, type DieHandle, type DieReading } from "./Die";
+import { Die, DIE_DISPLAY_SCALE, type DieHandle, type DieReading } from "./Die";
 import {
   faceUpQuaternion,
   keepGroups,
@@ -221,7 +221,7 @@ export function DiceSet() {
       if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > tapSlop(event.pointerType)) return;
       const { camera, size } = getThree();
       const rect = canvas.getBoundingClientRect();
-      right.setFromMatrixColumn(camera.matrixWorld, 0).multiplyScalar(DIE_SIZE / 2);
+      right.setFromMatrixColumn(camera.matrixWorld, 0).multiplyScalar((DIE_SIZE * DIE_DISPLAY_SCALE) / 2);
       const toScreen = (v: Vector3) => {
         v.project(camera);
         return [((v.x + 1) / 2) * size.width, ((1 - v.y) / 2) * size.height] as const;
