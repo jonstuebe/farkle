@@ -117,6 +117,27 @@ body,
   height: 100%;
 }
 
+/*
+ * Installed on iOS with a translucent status bar, 100% comes up short by the status bar's
+ * height and leaves an empty strip at the bottom. The large viewport unit is the full screen.
+ */
+@media (display-mode: standalone) {
+  html,
+  body,
+  #root {
+    height: 100vh;
+    height: 100lvh;
+  }
+
+  /* Full-screen fixed layers come up short the same way. */
+  .fk-hud,
+  .fk-floats {
+    bottom: auto;
+    height: 100vh;
+    height: 100lvh;
+  }
+}
+
 html {
   background: var(--wood-900);
   -webkit-text-size-adjust: 100%;

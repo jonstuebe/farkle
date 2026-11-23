@@ -13,12 +13,20 @@ import {
   Vector2,
   Vector3,
 } from "three";
-import { topFace, type DieValue } from "./dice";
+import { DIE_SIZE, topFace, type DieValue } from "./dice";
 import { squareUpQuaternion, type Vec3 } from "./diceLayout";
 import { clearDiceOccluder, setDiceOccluder } from "./surfaces";
 import { getDiceTextures, getDieGeometry } from "./textures";
 
 const SELECT_LIFT = 0.2;
+/**
+ * Drawn a little larger on touch screens, where dice are small under a fingertip. Visual only:
+ * the throw simulation and layout still use DIE_SIZE.
+ */
+export const DIE_DISPLAY_SCALE =
+  typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches ? 1.04 : 1;
+/** Raise the scaled die so it still sits on the felt rather than sinking into it. */
+const SCALE_LIFT = (DIE_SIZE * (DIE_DISPLAY_SCALE - 1)) / 2;
 const HIGHLIGHT = new Color("#ffb53a");
 const DIM = new Color(0.4, 0.4, 0.43);
 const WHITE = new Color(1, 1, 1);
@@ -202,9 +210,9 @@ export function Die({ index, ref, initialPosition, interactive = false, selected
     if (group?.parent) {
       // World-up expressed in the die's own frame, so the lift is always straight up.
       _up.set(0, 1, 0).applyQuaternion(_rotation.copy(group.parent.quaternion).invert());
-      group.position.copy(_up).multiplyScalar(h * SELECT_LIFT);
+      group.position.copy(_up).multiplyScalar(h * SELECT_LIFT + SCALE_LIFT);
       // Tell the felt where this die is, so it can shade the cloth underneath.
-      setDiceOccluder(index, group.parent.position, group.parent.quaternion, h * SELECT_LIFT);
+      setDiceOccluder(index, group.parent.position, group.parent.quaternion, h * SELECT_LIFT + SCALE_LIFT);
     }
     material.emissive.copy(HIGHLIGHT);
     material.emissiveIntensity = h * 0.16;
@@ -244,7 +252,7 @@ export function Die({ index, ref, initialPosition, interactive = false, selected
       position={spawn}
       rotation={SPAWN_ROTATION}
     >
-      <group ref={visual}>
+      <group ref={visual} scale={DIE_DISPLAY_SCALE}>
         <mesh
           geometry={getDieGeometry()}
           material={material}
