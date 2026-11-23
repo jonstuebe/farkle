@@ -210,6 +210,11 @@ button:disabled {
   background: var(--wood-900);
 }
 
+/* No double-tap zoom or tap delay when picking dice. */
+.app-game canvas {
+  touch-action: manipulation;
+}
+
 /* Shown while the 3D chunk (three + rapier) downloads and compiles. */
 .app-loading {
   position: absolute;

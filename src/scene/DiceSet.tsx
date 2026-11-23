@@ -24,6 +24,8 @@ import {
   type Vec3,
 } from "./diceLayout";
 import { KeptLaneMarks } from "./KeptLaneMarks";
+import { DIE_SIZE } from "./dice";
+import { pickDie, tapSlop, type ScreenDie } from "./tapPick";
 import { planThrow, samplePlan, type ThrowPlan } from "./throwSim";
 
 declare global {
@@ -195,6 +197,55 @@ export function DiceSet() {
     [actor, sendIntent],
   );
 
+  // Tapping: rather than requiring a hit on the die mesh itself (small on a phone), a tap
+  // goes to the nearest pickable die within a generous on-screen radius.
+  const getThree = useThree((state) => state.get);
+  const pickableRef = useRef<number[]>([]);
+  const onToggleRef = useRef(onToggle);
+  onToggleRef.current = onToggle;
+  useEffect(() => {
+    let down: { id: number; x: number; y: number } | null = null;
+    const center = new Vector3();
+    const edge = new Vector3();
+    const right = new Vector3();
+    const onDown = (event: PointerEvent) => {
+      down = event.isPrimary && event.button === 0 ? { id: event.pointerId, x: event.clientX, y: event.clientY } : null;
+    };
+    const onCancel = () => {
+      down = null;
+    };
+    const onUp = (event: PointerEvent) => {
+      const start = down;
+      down = null;
+      if (!start || start.id !== event.pointerId) return;
+      if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > tapSlop(event.pointerType)) return;
+      const { camera, size } = getThree();
+      const rect = canvas.getBoundingClientRect();
+      right.setFromMatrixColumn(camera.matrixWorld, 0).multiplyScalar(DIE_SIZE / 2);
+      const toScreen = (v: Vector3) => {
+        v.project(camera);
+        return [((v.x + 1) / 2) * size.width, ((1 - v.y) / 2) * size.height] as const;
+      };
+      const onScreen: ScreenDie[] = pickableRef.current.flatMap((index) => {
+        const handle = handles.current[index];
+        if (!handle?.ready()) return [];
+        const [x, y] = toScreen(center.set(...handle.read().position));
+        const [ex, ey] = toScreen(edge.set(...handle.read().position).add(right));
+        return [{ index, x, y, radius: Math.hypot(ex - x, ey - y) }];
+      });
+      const index = pickDie(event.clientX - rect.left, event.clientY - rect.top, onScreen);
+      if (index !== null) onToggleRef.current(index);
+    };
+    canvas.addEventListener("pointerdown", onDown);
+    canvas.addEventListener("pointerup", onUp);
+    canvas.addEventListener("pointercancel", onCancel);
+    return () => {
+      canvas.removeEventListener("pointerdown", onDown);
+      canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointercancel", onCancel);
+    };
+  }, [canvas, getThree]);
+
   useFrame((_, rawDelta) => {
     const all = handles.current;
     if (DICE.some((i) => !all[i]?.ready())) return;
@@ -359,6 +410,12 @@ export function DiceSet() {
     throwSettled(thrown.seq);
   });
 
+  const isPickable = (i: number) => {
+    const state = dice[i];
+    return canAct && phase === "choosing" && !!state && !state.held && state.value !== null;
+  };
+  pickableRef.current = DICE.filter(isPickable);
+
   return (
     <>
       <KeptLaneMarks dividers={dividers} />
@@ -373,10 +430,9 @@ export function DiceSet() {
               handles.current[i] = handle;
             }}
             initialPosition={readyPosition(i)}
-            interactive={canAct && phase === "choosing" && free && state.value !== null}
+            interactive={isPickable(i)}
             selected={phase === "choosing" && selected.includes(i)}
             dimmed={phase === "farkled" && free}
-            onToggle={onToggle}
           />
         );
       })}
