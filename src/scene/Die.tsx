@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
-import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { RigidBody, type RapierRigidBody } from "@react-three/rapier";
 import {
   BackSide,
@@ -78,12 +78,11 @@ export interface DieProps {
   index: number;
   ref?: Ref<DieHandle>;
   initialPosition: Vec3;
-  /** Clickable right now. */
+  /** Tappable right now (DiceSet does the picking; this drives the cursor). */
   interactive?: boolean;
   selected?: boolean;
   /** Greyed out (farkle). */
   dimmed?: boolean;
-  onToggle?: (index: number) => void;
 }
 
 interface Glide {
@@ -105,7 +104,7 @@ const _up = new Vector3();
  * (carried moves, or frame-by-frame playback of a simulated throw) and it reports what it
  * shows. The body is kinematic, so the renderer interpolates it like any other body.
  */
-export function Die({ index, ref, initialPosition, interactive = false, selected = false, dimmed = false, onToggle }: DieProps) {
+export function Die({ index, ref, initialPosition, interactive = false, selected = false, dimmed = false }: DieProps) {
   const body = useRef<RapierRigidBody>(null);
   const visual = useRef<Group>(null);
   const outline = useRef<Mesh>(null);
@@ -237,14 +236,6 @@ export function Die({ index, ref, initialPosition, interactive = false, selected
     [material, outlineMaterial, index],
   );
 
-  const onClick = (event: ThreeEvent<MouseEvent>) => {
-    if (!interactive) return;
-    event.stopPropagation();
-    // `delta` is how far the pointer travelled between down and up: ignore drags.
-    if (event.delta > 8) return;
-    onToggle?.(index);
-  };
-
   return (
     <RigidBody
       ref={body}
@@ -259,7 +250,6 @@ export function Die({ index, ref, initialPosition, interactive = false, selected
           material={material}
           castShadow
           receiveShadow
-          onClick={onClick}
           onPointerOver={(event) => {
             event.stopPropagation();
             setHovered(true);
