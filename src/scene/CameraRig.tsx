@@ -33,6 +33,14 @@ export const ROTATED_PITCH_DEG = 76;
 export const ROTATED_YAW_DEG = 90;
 /** Only rotate when it makes the tray at least this much bigger on screen (avoids flip-flopping near square). */
 export const ROTATE_MIN_GAIN = 1.12;
+/**
+ * On touch screens the camera frames just the felt, so the wooden rail is cropped off and the
+ * playing surface fills the screen. Trimmed a touch further so no rail edge peeks in.
+ */
+export const FELT_CROP = 0.08;
+/** Touch screens (phones, tablets) frame the felt only; mouse-driven screens show the whole tray. */
+export const FELT_ONLY_DEFAULT =
+  typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
 /** Time constant of the settle after a resize / orientation change, in seconds. */
 export const SETTLE_SECONDS = 0.22;
 
@@ -57,6 +65,8 @@ export interface FramingInput {
   fovDeg: number;
   /** HUD insets in CSS px (before capping). Defaults to the `HUD_INSET_*` constants. */
   insets?: Insets;
+  /** Frame only the felt (rail cropped off screen) instead of the whole tray. */
+  feltOnly?: boolean;
 }
 
 export interface Framing {
@@ -87,8 +97,27 @@ const DEFAULT_INSETS: Insets = {
   right: HUD_INSET_RIGHT,
 };
 
-/** The eight corners of the framed box. */
-export function frameCorners(): Vec3[] {
+/**
+ * The corners of the framed box: the whole tray up to the rail's top, or with `feltOnly` the
+ * felt rectangle alone. The rail nearest the camera leans over the felt on screen, so in that
+ * case the near edge is pulled in by the rail's height over the view (pitch/yaw) to hide it.
+ */
+export function frameCorners(feltOnly = false, pitchDeg = 90, yawDeg = 0): Vec3[] {
+  if (feltOnly) {
+    const lean = RAIL_HEIGHT / Math.tan(pitchDeg * DEG);
+    // Horizontal direction towards the camera.
+    const towardX = Math.sin(yawDeg * DEG);
+    const towardZ = Math.cos(yawDeg * DEG);
+    const halfW = TRAY_WIDTH / 2 - FELT_CROP;
+    const halfD = TRAY_DEPTH / 2 - FELT_CROP;
+    const corners: Vec3[] = [];
+    for (const x of [-halfW, halfW]) {
+      for (const z of [-halfD, halfD]) {
+        corners.push([x - (x * towardX > 0.5 ? Math.sign(x) * lean : 0), 0, z - (z * towardZ > 0.5 ? Math.sign(z) * lean : 0)]);
+      }
+    }
+    return corners;
+  }
   const corners: Vec3[] = [];
   for (const x of [-FRAME_HALF_WIDTH, FRAME_HALF_WIDTH]) {
     for (const y of [0, FRAME_TOP]) {
@@ -141,7 +170,7 @@ export function fitPose(input: FramingInput, pitchDeg: number, yawDeg: number): 
   const right: Vec3 = [Math.cos(yaw), 0, -Math.sin(yaw)];
   const up: Vec3 = [-Math.sin(pitch) * Math.sin(yaw), Math.cos(pitch), -Math.sin(pitch) * Math.cos(yaw)];
 
-  const corners = frameCorners();
+  const corners = frameCorners(input.feltOnly, pitchDeg, yawDeg);
   const xs = corners.map((corner) => dot(corner, right));
   const ys = corners.map((corner) => dot(corner, up));
   const depths = corners.map((corner) => dot(corner, back));
@@ -279,7 +308,7 @@ export function CameraRig() {
 
   useLayoutEffect(() => {
     if (!(camera instanceof PerspectiveCamera) || width === 0 || height === 0) return;
-    const framing = computeFraming({ width, height, fovDeg: camera.fov, insets });
+    const framing = computeFraming({ width, height, fovDeg: camera.fov, insets, feltOnly: FELT_ONLY_DEFAULT });
     goal.position.set(...framing.position);
     goal.basis.makeBasis(
       new Vector3(...framing.right),

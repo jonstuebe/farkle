@@ -5,6 +5,12 @@ import { captureInstallPrompt } from "./net/install";
 import { registerServiceWorker } from "./net/turnAlerts";
 import "./index.css";
 
+// iOS Safari ignores user-scalable=no and touch-action for pinches; its own gesture events
+// are the only way to stop a pinch zooming the page.
+for (const type of ["gesturestart", "gesturechange"]) {
+  document.addEventListener(type, (event) => event.preventDefault(), { passive: false });
+}
+
 // Before React: Chrome fires its install prompt early, and only once.
 captureInstallPrompt();
 

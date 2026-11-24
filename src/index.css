@@ -140,6 +140,8 @@ body,
 
 html {
   background: var(--wood-900);
+  /* No pinch or double-tap zoom: it's a game screen, and a stray pinch while picking dice zooms the page. */
+  touch-action: pan-x pan-y;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }

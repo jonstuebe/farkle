@@ -143,3 +143,20 @@ describe("computeFraming", () => {
     expect(left).toBeGreaterThanOrEqual(150 - 0.01);
   });
 });
+
+describe("felt-only framing (touch screens)", () => {
+  it.each(VIEWPORTS)("frames the tray closer and keeps the felt inside the insets at %ix%i", (width, height) => {
+    const whole = computeFraming({ width, height, fovDeg: FOV });
+    const input: FramingInput = { width, height, fovDeg: FOV, feltOnly: true };
+    const felt = computeFraming(input);
+    expect(felt.distance).toBeLessThan(whole.distance);
+    const insets = effectiveInsets(width, height);
+    for (const corner of frameCorners(true, felt.pitchDeg, felt.yawDeg)) {
+      const p = projectToScreen(corner, felt, input);
+      expect(p.x).toBeGreaterThanOrEqual(insets.left - 0.5);
+      expect(p.x).toBeLessThanOrEqual(width - insets.right + 0.5);
+      expect(p.y).toBeGreaterThanOrEqual(insets.top - 0.5);
+      expect(p.y).toBeLessThanOrEqual(height - insets.bottom + 0.5);
+    }
+  });
+});
