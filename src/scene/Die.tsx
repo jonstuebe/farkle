@@ -20,11 +20,11 @@ import { getDiceTextures, getDieGeometry } from "./textures";
 
 const SELECT_LIFT = 0.2;
 /**
- * Drawn a little larger on touch screens, where dice are small under a fingertip. Visual only:
+ * Drawn larger (about 14%) on touch screens, where dice are small under a fingertip. Visual only:
  * the throw simulation and layout still use DIE_SIZE.
  */
 export const DIE_DISPLAY_SCALE =
-  typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches ? 1.04 : 1;
+  typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches ? 1.144 : 1;
 /** Raise the scaled die so it still sits on the felt rather than sinking into it. */
 const SCALE_LIFT = (DIE_SIZE * (DIE_DISPLAY_SCALE - 1)) / 2;
 const HIGHLIGHT = new Color("#ffb53a");
