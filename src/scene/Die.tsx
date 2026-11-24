@@ -15,6 +15,7 @@ import {
 } from "three";
 import { DIE_SIZE, topFace, type DieValue } from "./dice";
 import { squareUpQuaternion, type Vec3 } from "./diceLayout";
+import { IS_TOUCH } from "./touch";
 import { clearDiceOccluder, setDiceOccluder } from "./surfaces";
 import { getDiceTextures, getDieGeometry } from "./textures";
 
@@ -23,8 +24,7 @@ const SELECT_LIFT = 0.2;
  * Drawn larger (about 14%) on touch screens, where dice are small under a fingertip. Visual only:
  * the throw simulation and layout still use DIE_SIZE.
  */
-export const DIE_DISPLAY_SCALE =
-  typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches ? 1.144 : 1;
+export const DIE_DISPLAY_SCALE = IS_TOUCH ? 1.144 : 1;
 /** Raise the scaled die so it still sits on the felt rather than sinking into it. */
 const SCALE_LIFT = (DIE_SIZE * (DIE_DISPLAY_SCALE - 1)) / 2;
 const HIGHLIGHT = new Color("#ffb53a");

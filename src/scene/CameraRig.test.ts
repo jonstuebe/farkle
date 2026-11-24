@@ -151,7 +151,7 @@ describe("felt-only framing (touch screens)", () => {
     const felt = computeFraming(input);
     expect(felt.distance).toBeLessThan(whole.distance);
     const insets = effectiveInsets(width, height);
-    for (const corner of frameCorners(true, felt.pitchDeg, felt.yawDeg)) {
+    for (const corner of frameCorners(true)) {
       const p = projectToScreen(corner, felt, input);
       expect(p.x).toBeGreaterThanOrEqual(insets.left - 0.5);
       expect(p.x).toBeLessThanOrEqual(width - insets.right + 0.5);

@@ -99,9 +99,23 @@ function extend(
     .replace("#include <opaque_fragment>", `${parts.shading}\n#include <opaque_fragment>`);
 }
 
-/** Wool baize lining the tray. */
-export function createFeltMaterial(): MeshPhysicalMaterial {
-  const { map, normalMap } = getFeltTextures();
+/**
+ * Wool baize lining the tray. `extent` is the size of the felt plane in world units when it is
+ * bigger than the tray (the borderless touch layout): the texture is tiled to match, and there is
+ * no contact shadow along the tray's edge, since no rail is drawn there.
+ */
+export function createFeltMaterial(extent?: number): MeshPhysicalMaterial {
+  let { map, normalMap } = getFeltTextures();
+  if (extent) {
+    // Same tile size as on the tray: one tile per 2 world units.
+    map = map.clone();
+    normalMap = normalMap.clone();
+    for (const texture of [map, normalMap]) {
+      texture.repeat.set(extent / 2, extent / 2);
+      texture.needsUpdate = true;
+    }
+  }
+  const railShadow = extent ? "1.0" : "(1.0 - 0.5 * exp(-max(toRail, 0.0) / 0.3))";
   const material = new MeshPhysicalMaterial({
     map,
     normalMap,
@@ -141,7 +155,7 @@ uniform vec2 uDiceAxis[${DICE_COUNT}];
   // Contact shadow in the corner where the cloth meets the rails and the lane divider.
   float toRail = min(${glsl(TRAY_WIDTH / 2)} - abs(p.x), ${glsl(TRAY_DEPTH / 2)} - abs(p.y));
   float toDivider = abs(p.y - ${glsl(DIVIDER_Z)}) - ${glsl(DIVIDER_THICKNESS / 2)};
-  float occlusion = (1.0 - 0.5 * exp(-max(toRail, 0.0) / 0.3)) * (1.0 - 0.4 * exp(-max(toDivider, 0.0) / 0.16));
+  float occlusion = ${railShadow} * (1.0 - 0.4 * exp(-max(toDivider, 0.0) / 0.16));
 
   // …and under every die: tight and dark when it rests, wide and faint while it is in the air.
   for (int i = 0; i < ${DICE_COUNT}; i++) {
@@ -158,7 +172,7 @@ uniform vec2 uDiceAxis[${DICE_COUNT}];
 `,
     });
   };
-  material.customProgramCacheKey = () => "farkle-felt";
+  material.customProgramCacheKey = () => (extent ? "farkle-felt-borderless" : "farkle-felt");
   return material;
 }
 
